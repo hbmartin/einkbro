@@ -119,8 +119,10 @@ class EBWebChromeClient(
             .replace("wv", "")
             .replace(Regex("Version/\\d+\\.\\d+\\s"), "")
         webSettings.cacheMode = WebSettings.LOAD_DEFAULT
-        webSettings.allowFileAccessFromFileURLs = true
-        webSettings.allowUniversalAccessFromFileURLs = true
+        // This transport WebView only ever hosts web content, so it never needs
+        // file-URL cross-origin powers.
+        webSettings.allowFileAccessFromFileURLs = false
+        webSettings.allowUniversalAccessFromFileURLs = false
         webSettings.domStorageEnabled = true
         webSettings.databaseEnabled = true
         webSettings.javaScriptEnabled = true
