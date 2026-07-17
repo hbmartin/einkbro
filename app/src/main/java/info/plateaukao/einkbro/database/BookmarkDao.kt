@@ -46,7 +46,7 @@ import org.koin.core.component.inject
         UserScript::class,
         UserScriptValue::class,
     ],
-    version = 10,
+    version = 11,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -261,6 +261,15 @@ class BookmarkManager(private val context: Context) : KoinComponent {
         }
     }
 
+    private val migration10To11: Migration = object : Migration(10, 11) {
+        override fun migrate(database: SupportSQLiteDatabase) {
+            database.execSQL("CREATE INDEX IF NOT EXISTS `index_bookmarks_url` ON `bookmarks` (`url`)")
+            database.execSQL("CREATE INDEX IF NOT EXISTS `index_bookmarks_parent` ON `bookmarks` (`parent`)")
+            database.execSQL("CREATE INDEX IF NOT EXISTS `index_HISTORY_URL` ON `HISTORY` (`URL`)")
+            database.execSQL("CREATE INDEX IF NOT EXISTS `index_HISTORY_TIME` ON `HISTORY` (`TIME`)")
+        }
+    }
+
     val database = Room.databaseBuilder(context, AppDatabase::class.java, "einkbro_db")
         .addMigrations(migration1To2)
         .addMigrations(migration2To3)
@@ -271,6 +280,7 @@ class BookmarkManager(private val context: Context) : KoinComponent {
         .addMigrations(migration7To8)
         .addMigrations(migration8To9)
         .addMigrations(migration9To10)
+        .addMigrations(migration10To11)
         .build()
 
     val bookmarkDao = database.bookmarkDao()

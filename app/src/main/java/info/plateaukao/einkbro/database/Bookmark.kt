@@ -1,9 +1,16 @@
 package info.plateaukao.einkbro.database
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "bookmarks")
+@Entity(
+    tableName = "bookmarks",
+    indices = [
+        Index(value = ["url"], unique = false),
+        Index(value = ["parent"], unique = false),
+    ],
+)
 data class Bookmark(
     var title: String,
     var url: String,

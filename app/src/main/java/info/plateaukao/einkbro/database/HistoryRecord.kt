@@ -1,9 +1,16 @@
 package info.plateaukao.einkbro.database
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "HISTORY")
+@Entity(
+    tableName = "HISTORY",
+    indices = [
+        Index(value = ["URL"], unique = false),
+        Index(value = ["TIME"], unique = false),
+    ],
+)
 data class HistoryRecord(
     val TITLE: String,
     val URL: String,
