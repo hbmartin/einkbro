@@ -68,10 +68,15 @@ elements[i].style.color='white';
 
     inner class Chapter(val name: String, val content: String, val href: String)
 
+    // Chapters are rendered from files this reader extracted itself under cacheDir,
+    // and their images/CSS are file:// subresources of a file:// base URL.
+    override val trustLocalFileContent = true
+
     init {
         with(settings) {
             allowContentAccess = true
             allowFileAccess = true
+            allowFileAccessFromFileURLs = true
         }
         isEpubReaderMode = true
         isVerticalRead = false

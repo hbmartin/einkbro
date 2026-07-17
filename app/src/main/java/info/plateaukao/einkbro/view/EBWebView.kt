@@ -47,6 +47,8 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.IOException
 import kotlin.coroutines.resume
 
 
@@ -345,6 +347,11 @@ open class EBWebView(
     override fun goBack() {
         resetState()
         settings.textZoom = config.display.fontSize
+        // history navigation bypasses loadUrl, so re-evaluate file-URL trust for the target
+        val backForwardList = copyBackForwardList()
+        backForwardList.getItemAtIndex(backForwardList.currentIndex - 1)?.url?.let {
+            applyFileUrlPolicy(it)
+        }
         super.goBack()
     }
 
@@ -426,6 +433,7 @@ open class EBWebView(
         url?.let {
             settings.javaScriptEnabled = isJavascriptEnabled(it)
             toggleCookieSupport(shouldAcceptCookies(it))
+            applyFileUrlPolicy(it)
         }
     }
 
@@ -433,6 +441,34 @@ open class EBWebView(
     private fun isJavascriptEnabled(url: String): Boolean =
         config.getDomainConfig(url).enableJavascript
             ?: (config.browser.enableJavascript || javascript.isWhite(url))
+
+    // The EPUB reader renders its own extracted files from cacheDir and needs
+    // file→file access regardless of the remote-access setting.
+    protected open val trustLocalFileContent = false
+
+    private fun applyFileUrlPolicy(url: String) {
+        val lockedDown = !trustLocalFileContent && isUntrustedCacheFileUrl(url)
+        settings.allowFileAccessFromFileURLs =
+            (config.browser.enableRemoteAccess || trustLocalFileContent) && !lockedDown
+        settings.allowUniversalAccessFromFileURLs =
+            config.browser.enableRemoteAccess && !lockedDown
+    }
+
+    // Files under cacheDir are imports copied from other apps' content:// payloads
+    // (IntentDispatchDelegate); they must never get cross-origin file powers.
+    private fun isUntrustedCacheFileUrl(url: String): Boolean {
+        val uri = Uri.parse(url)
+        if (!"file".equals(uri.scheme, ignoreCase = true)) return false
+        val path = uri.path ?: return true
+        return try {
+            val canonical = File(path).canonicalPath
+            // canonicalize both sides: /data/data vs /data/user/0 are symlinked
+            val cacheRoot = context.cacheDir.canonicalPath
+            canonical == cacheRoot || canonical.startsWith("$cacheRoot/")
+        } catch (e: IOException) {
+            true
+        }
+    }
 
     private fun shouldAcceptCookies(url: String): Boolean =
         config.getDomainConfig(url).enableCookies
@@ -469,6 +505,14 @@ open class EBWebView(
         }
     }
 
+    // Settings that must match the page being navigated to, applied on every load.
+    private fun applyPerLoadSettings(url: String) {
+        settings.javaScriptEnabled = isJavascriptEnabled(url)
+        toggleCookieSupport(shouldAcceptCookies(url))
+        applyDesktopMode(url)
+        applyFileUrlPolicy(url)
+    }
+
     override fun loadUrl(url: String, additionalHttpHeaders: MutableMap<String, String>) {
         if (webViewCallback?.loadInSecondPane(url) == true) {
             return
@@ -480,9 +524,7 @@ open class EBWebView(
             setAlbumCover(it)
         }
 
-        settings.javaScriptEnabled = isJavascriptEnabled(url)
-        toggleCookieSupport(shouldAcceptCookies(url))
-        applyDesktopMode(url)
+        applyPerLoadSettings(url)
 
         super.loadUrl(url, additionalHttpHeaders)
     }
@@ -523,9 +565,7 @@ open class EBWebView(
             setAlbumCover(it)
         }
 
-        settings.javaScriptEnabled = isJavascriptEnabled(url)
-        toggleCookieSupport(shouldAcceptCookies(url))
-        applyDesktopMode(url)
+        applyPerLoadSettings(url)
 
         super.loadUrl(BrowserUnit.queryWrapper(context, strippedUrl), requestHeaders)
     }
