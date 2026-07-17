@@ -38,6 +38,7 @@ import info.plateaukao.einkbro.preference.ConfigManager
 import info.plateaukao.einkbro.unit.BrowserUnit
 import info.plateaukao.einkbro.unit.HelperUnit
 import info.plateaukao.einkbro.unit.EinkImageCache
+import info.plateaukao.einkbro.unit.WebIntentSanitizer
 import info.plateaukao.einkbro.view.EBToast
 import info.plateaukao.einkbro.view.EBWebView
 import info.plateaukao.einkbro.view.WebViewConfigApplier
@@ -391,7 +392,10 @@ class EBWebViewClient(
                 return true
             }
             try {
-                val intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
+                // Sanitize before resolveActivity so only BROWSABLE targets resolve;
+                // everything else falls through to the browser_fallback_url path.
+                val intent =
+                    WebIntentSanitizer.sanitize(Intent.parseUri(url, Intent.URI_INTENT_SCHEME))
                 if (intent.resolveActivity(context.packageManager) != null || intent.data?.scheme == "market") {
                     try {
                         context.startActivity(intent)
@@ -424,14 +428,18 @@ class EBWebViewClient(
     private fun maybeHandleFallbackUrl(webView: WebView, intent: Intent): Boolean {
         val fallbackUrl = intent.getStringExtra("browser_fallback_url") ?: return false
         if (fallbackUrl.startsWith("market://")) {
-            val intent = Intent.parseUri(fallbackUrl, Intent.URI_INTENT_SCHEME)
+            val marketIntent =
+                WebIntentSanitizer.sanitize(Intent.parseUri(fallbackUrl, Intent.URI_INTENT_SCHEME))
             try {
-                context.startActivity(intent)
+                context.startActivity(marketIntent)
             } catch (e: Exception) {
                 EBToast.show(context, R.string.toast_load_error)
             }
             return true
         }
+
+        // Pages must not use the fallback to reach javascript:/file:/intent: etc.
+        if (!WebIntentSanitizer.isSafeFallbackUrl(fallbackUrl)) return true
 
         webView.loadUrl(fallbackUrl)
         return true
