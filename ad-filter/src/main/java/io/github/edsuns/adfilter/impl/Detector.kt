@@ -29,6 +29,7 @@ internal class DetectorImpl : Detector {
     override val clients = CopyOnWriteArrayList<Client>()
 
     // null means disabled
+    @Volatile
     override var customFilterClient: Client? = null
         set(value) {
             if (value != null) {

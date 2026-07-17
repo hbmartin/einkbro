@@ -15,6 +15,7 @@ import io.github.edsuns.adfilter.workers.InstallationWorker
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
@@ -65,12 +66,12 @@ internal class FilterViewModelImpl(
 
     override val filters: StateFlow<Map<String, Filter>> = _filterMap.asStateFlow()
     override fun updateFilterByFilterId(id: String, filter: Filter) {
-        _filterMap.value = filters.value.toMutableMap().apply { set(id, filter) }
+        _filterMap.update { it + (id to filter) }
         saveFilterMap()
     }
 
     override fun updateFilters() {
-        _filterMap.value = filters.value.toMutableMap()
+        _filterMap.update { HashMap(it) }
     }
 
 
@@ -84,7 +85,14 @@ internal class FilterViewModelImpl(
         _workToFilterMap.value = map
     }
 
-    init {
+    /**
+     * Reconciles persisted download states with WorkManager after process death.
+     * Blocking (ListenableFuture.get() and synchronous prefs commits), so it must
+     * be called from a background thread. Invoked exactly once by [AdFilterImpl]
+     * before it starts collecting [workInfo], so reconciliation completes before
+     * any workInfo-driven filter update.
+     */
+    internal fun reconcileDownloadStates() {
         try {
             workManager.pruneWork()
             // clear bad running download state
@@ -117,7 +125,7 @@ internal class FilterViewModelImpl(
 
     override fun addFilter(name: String, url: String): Filter {
         val newFilter = Filter(url, name)
-        _filterMap.value = filters.value.toMutableMap().apply { set(newFilter.id, newFilter) }
+        _filterMap.update { it + (newFilter.id to newFilter) }
         updateFilterByFilterId(newFilter.id, newFilter)
         return newFilter
     }
@@ -125,7 +133,7 @@ internal class FilterViewModelImpl(
     override fun removeFilter(id: String) {
         cancelDownload(id)
         filterDataLoader.remove(id)
-        _filterMap.value = filters.value.toMutableMap().apply { remove(id) }
+        _filterMap.update { it - id }
         flushFilter()
     }
 
@@ -138,7 +146,7 @@ internal class FilterViewModelImpl(
                 else
                     disableFilter(it)
 
-                _filterMap.value = filters.value.toMutableMap()
+                _filterMap.update { HashMap(it) }
                 saveFilterMap()
             }
         }
@@ -231,6 +239,7 @@ internal class FilterViewModelImpl(
         saveFilterMap()
     }
 
+    @Synchronized
     private fun saveFilterMap() {
         sharedPreferences.filterMap = Json.encodeToString(_filterMap.value)
     }

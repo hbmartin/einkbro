@@ -18,6 +18,7 @@ import io.github.edsuns.adfilter.script.ElementHiding
 import io.github.edsuns.adfilter.script.ScriptInjection
 import io.github.edsuns.adfilter.script.Scriptlet
 import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 import java.io.File
@@ -38,7 +39,7 @@ internal class AdFilterImpl(appContext: Context) : AdFilter {
     private val elementHiding: ElementHiding = ElementHiding(detector)
     private val scriptlet: Scriptlet = Scriptlet(detector)
 
-    override val customFilter = filterDataLoader.getCustomFilter()
+    override val customFilter: CustomFilter by lazy { filterDataLoader.getCustomFilter() }
 
     override val viewModel = FilterViewModelImpl(appContext, filterDataLoader)
 
@@ -54,10 +55,10 @@ internal class AdFilterImpl(appContext: Context) : AdFilter {
         get() = viewModel.sharedPreferences.hasInstallation
 
     init {
-        GlobalScope.launch {
+        GlobalScope.launch(Dispatchers.IO) {
+            viewModel.reconcileDownloadStates()
             viewModel.workInfo.collect { list -> processWorkInfo(list) }
         }
-
     }
 
     override fun setEnabled(enable: Boolean) {

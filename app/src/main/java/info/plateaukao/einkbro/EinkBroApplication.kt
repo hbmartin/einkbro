@@ -116,7 +116,12 @@ class EinkBroApplication : Application() {
         }
 
         val filter = AdFilter.create(this)
-        filter.setEnabled(config.browser.adBlock)
+        // Loading filter lists reads multi-MB blobs from disk and parses them via
+        // JNI; run it off the main thread so cold start isn't blocked. Requests
+        // during the brief load window fail open (nothing blocked).
+        appScope.launch(Dispatchers.IO) {
+            filter.setEnabled(config.browser.adBlock)
+        }
         if (config.browser.adBlock) {
             appScope.launch {
                 filter.viewModel.workToFilterMap.collect { notifyDownloading(it.isEmpty()) }
