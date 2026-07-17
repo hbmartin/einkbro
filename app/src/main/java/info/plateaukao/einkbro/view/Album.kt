@@ -7,12 +7,12 @@ import androidx.compose.runtime.setValue
 import info.plateaukao.einkbro.browser.AlbumCallback
 import info.plateaukao.einkbro.browser.AlbumController
 
-data class Album(
-    private val albumController: AlbumController,
+class Album(
+    private var albumController: AlbumController,
     private var albumCallback: AlbumCallback?
 ) {
-    // Stable identity for Compose lazy keys (data-class equals only covers
-    // constructor params, and the controller is a mutable WebView).
+    // Stable identity for Compose lazy keys; the album outlives its controller
+    // (a hibernated tab swaps its WebView for a placeholder and back).
     val id: Int = nextAlbumId++
 
     var isLoaded = false
@@ -43,6 +43,10 @@ data class Album(
     }
 
     fun getUrl(): String = albumController.albumUrl
+
+    fun updateAlbumController(controller: AlbumController) {
+        albumController = controller
+    }
 
     fun setAlbumCover(bitmap: Bitmap?) {
         this.bitmap = bitmap

@@ -8,8 +8,10 @@ import android.widget.FrameLayout
 import androidx.fragment.app.FragmentActivity
 import info.plateaukao.einkbro.R
 import info.plateaukao.einkbro.activity.BrowserState
+import info.plateaukao.einkbro.browser.AlbumCallback
 import info.plateaukao.einkbro.browser.AlbumController
 import info.plateaukao.einkbro.browser.BrowserContainer
+import info.plateaukao.einkbro.browser.PlaceholderAlbumController
 import info.plateaukao.einkbro.database.BookmarkManager
 import info.plateaukao.einkbro.preference.AlbumInfo
 import info.plateaukao.einkbro.preference.ConfigManager
@@ -95,6 +97,11 @@ class TabManager(
         enablePreloadWebView: Boolean = true,
         lazyLoad: Boolean = false,
     ) {
+        if (lazyLoad && !foreground) {
+            addPlaceholderAlbum(title, url, incognito)
+            return
+        }
+
         // the preloaded webview snapshots settings at creation time; desktop
         // mode may have been toggled since, so refresh the user agent
         val newWebView = (preloadedWebView?.also { it.updateUserAgentString() }
@@ -118,6 +125,50 @@ class TabManager(
         }
     }
 
+    // A lazily-restored tab defers even WebView construction: it occupies a
+    // container slot as a placeholder and materializes on first activation.
+    private fun addPlaceholderAlbum(title: String, url: String, incognito: Boolean) {
+        val placeholder = PlaceholderAlbumController(
+            title = title,
+            url = url,
+            incognito = incognito,
+            albumCallback = activity as? AlbumCallback,
+        )
+        updateTabPreview(placeholder, url)
+        updateWebViewCount()
+        updateSavedAlbumInfo()
+    }
+
+    // Build the real EBWebView for a placeholder tab and take over its slot.
+    @SuppressLint("ClickableViewAccessibility")
+    private fun materialize(placeholder: PlaceholderAlbumController): EBWebView {
+        val webView = preloadedWebView?.also { it.updateUserAgentString() } ?: createWebView()
+        maybeCreateNewPreloadWebView(true, webView)
+
+        webView.incognito = placeholder.incognito
+        webView.initAlbumUrl = placeholder.initAlbumUrl
+        webView.setOnTouchListener(createTouchListener(webView))
+        // Keep the same Album: tab id, title, and favicon carry over; isLoaded
+        // stays false so activate() runs the regular deferred URL load.
+        webView.adoptAlbum(placeholder.album)
+
+        // Restore the back/forward history captured at hibernation, if any.
+        placeholder.savedState?.let { bundle ->
+            webView.applyPerSiteSettings(placeholder.initAlbumUrl)
+            val restored = webView.restoreState(bundle)
+            if (restored != null && restored.size > 0) {
+                webView.album.isLoaded = true
+            }
+        }
+
+        browserContainer.replace(placeholder, webView)
+
+        if (config.browser.adBlock) {
+            adFilterProvider().setupWebView(webView)
+        }
+        return webView
+    }
+
     private fun maybeCreateNewPreloadWebView(
         enablePreloadWebView: Boolean,
         newWebView: EBWebView,
@@ -132,19 +183,19 @@ class TabManager(
         }
     }
 
-    private fun updateTabPreview(newWebView: EBWebView, url: String) {
+    private fun updateTabPreview(controller: AlbumController, url: String) {
         bookmarkManager.findFaviconBitmapBy(url)?.let {
-            newWebView.setAlbumCover(it)
+            controller.album.setAlbumCover(it)
         }
 
-        val album = newWebView.album
+        val album = controller.album
         val currentAlbumController = state.currentAlbumController
         if (currentAlbumController != null) {
             val index = browserContainer.indexOf(currentAlbumController) + 1
-            browserContainer.add(newWebView, index)
+            browserContainer.add(controller, index)
             albumViewModel.addAlbum(album, index)
         } else {
-            browserContainer.add(newWebView)
+            browserContainer.add(controller)
             albumViewModel.addAlbum(album, browserContainer.size() - 1)
         }
     }
@@ -171,7 +222,12 @@ class TabManager(
         }
     }
 
-    fun showAlbum(controller: AlbumController) {
+    fun showAlbum(albumController: AlbumController) {
+        // A placeholder tab (lazy-restored or hibernated) gets its real
+        // WebView here, right before it becomes the current album.
+        val controller = (albumController as? PlaceholderAlbumController)
+            ?.let { materialize(it) } ?: albumController
+
         val currentAlbumController = state.currentAlbumController
         if (currentAlbumController != null) {
             if (currentAlbumController == controller) {
@@ -361,10 +417,10 @@ class TabManager(
         nextAlbumController(true)?.let { showAlbum(it) }
     }
 
-    fun getUrlMatchedBrowser(url: String): EBWebView? {
+    fun getUrlMatchedBrowser(url: String): AlbumController? {
         return browserContainer.list().firstOrNull {
             it.albumUrl == url || (it.albumUrl.isBlank() && it.initAlbumUrl == url)
-        } as EBWebView?
+        }
     }
 
     private fun getNextAlbumIndexAfterRemoval(removeIndex: Int): Int =

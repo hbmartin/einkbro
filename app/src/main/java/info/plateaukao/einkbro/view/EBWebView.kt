@@ -56,7 +56,15 @@ open class EBWebView(
     var webViewCallback: WebViewCallback?,
 ) : WebView(context), AlbumController, KoinComponent {
     private var onScrollChangeListener: OnScrollChangeListener? = null
-    override val album: Album = Album(this, webViewCallback as? AlbumCallback)
+    private var _album: Album = Album(this, webViewCallback as? AlbumCallback)
+    override val album: Album get() = _album
+
+    // Take over the Album of the placeholder this WebView replaces, so the tab
+    // keeps its Compose identity, title, and favicon across materialization.
+    fun adoptAlbum(existing: Album) {
+        _album = existing
+        existing.updateAlbumController(this)
+    }
     internal val webViewClient: EBWebViewClient
     private val webChromeClient: EBWebChromeClient
     private val downloadListener by lazy { EBDownloadListener(this) }
@@ -480,9 +488,7 @@ open class EBWebView(
             setAlbumCover(it)
         }
 
-        settings.javaScriptEnabled = isJavascriptEnabled(url)
-        toggleCookieSupport(shouldAcceptCookies(url))
-        applyDesktopMode(url)
+        applyPerSiteSettings(url)
 
         super.loadUrl(url, additionalHttpHeaders)
     }
@@ -523,11 +529,18 @@ open class EBWebView(
             setAlbumCover(it)
         }
 
+        applyPerSiteSettings(url)
+
+        super.loadUrl(BrowserUnit.queryWrapper(context, strippedUrl), requestHeaders)
+    }
+
+    // Per-site settings are normally applied on every loadUrl; restoreState()
+    // bypasses loadUrl, so materialization applies them through this instead.
+    @SuppressLint("SetJavaScriptEnabled")
+    fun applyPerSiteSettings(url: String) {
         settings.javaScriptEnabled = isJavascriptEnabled(url)
         toggleCookieSupport(shouldAcceptCookies(url))
         applyDesktopMode(url)
-
-        super.loadUrl(BrowserUnit.queryWrapper(context, strippedUrl), requestHeaders)
     }
 
     fun setAlbumCover(bitmap: Bitmap) = album.setAlbumCover(bitmap)

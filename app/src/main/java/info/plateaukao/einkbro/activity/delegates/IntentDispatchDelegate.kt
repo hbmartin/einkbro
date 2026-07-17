@@ -16,7 +16,7 @@ import info.plateaukao.einkbro.unit.BrowserUnit
 import info.plateaukao.einkbro.unit.HelperUnit
 import info.plateaukao.einkbro.unit.HelperUnit.toNormalScheme
 import info.plateaukao.einkbro.util.Constants.Companion.ACTION_DICT
-import info.plateaukao.einkbro.view.EBWebView
+import info.plateaukao.einkbro.browser.AlbumController
 import info.plateaukao.einkbro.view.viewControllers.OverviewDialogController
 import info.plateaukao.einkbro.viewmodel.ExternalSearchViewModel
 import info.plateaukao.einkbro.viewmodel.RemoteConnViewModel
@@ -36,8 +36,8 @@ class IntentDispatchDelegate(
     private val overviewDialogControllerProvider: () -> OverviewDialogController,
     private val addAlbumAction: (title: String, url: String, foreground: Boolean, lazyLoad: Boolean) -> Unit,
     private val updateAlbum: (url: String) -> Unit,
-    private val showAlbum: (controller: info.plateaukao.einkbro.browser.AlbumController) -> Unit,
-    private val getUrlMatchedBrowser: (url: String) -> EBWebView?,
+    private val showAlbum: (controller: AlbumController) -> Unit,
+    private val getUrlMatchedBrowser: (url: String) -> AlbumController?,
     private val openHistoryPage: () -> Unit,
     private val openBookmarkPage: () -> Unit,
     private val focusOnInput: () -> Unit,

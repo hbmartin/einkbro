@@ -15,8 +15,14 @@ class BrowserContainer {
     fun add(controller: AlbumController, index: Int) = list.add(index, controller)
 
     fun remove(controller: AlbumController) {
-        destroyWebView(controller as EBWebView)
+        (controller as? EBWebView)?.let { destroyWebView(it) }
         list.remove(controller)
+    }
+
+    // Swap a controller in place (placeholder <-> EBWebView), preserving tab order.
+    fun replace(oldController: AlbumController, newController: AlbumController) {
+        val index = list.indexOf(oldController)
+        if (index >= 0) list[index] = newController
     }
 
     fun indexOf(controller: AlbumController?): Int = list.indexOf(controller)
@@ -29,14 +35,14 @@ class BrowserContainer {
 
     fun clear() {
         for (albumController in list) {
-            destroyWebView(albumController as EBWebView)
+            (albumController as? EBWebView)?.let { destroyWebView(it) }
         }
         list.clear()
     }
 
     // WebView.destroy() requires the view to be detached first; leaving it in
     // the tree also kept every closed tab pinned by its parent.
-    private fun destroyWebView(webView: EBWebView) {
+    fun destroyWebView(webView: EBWebView) {
         (webView.parent as? ViewGroup)?.removeView(webView)
         webView.destroy()
     }
