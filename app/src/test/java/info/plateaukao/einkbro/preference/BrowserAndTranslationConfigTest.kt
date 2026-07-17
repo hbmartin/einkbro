@@ -28,6 +28,15 @@ class BrowserConfigTest {
         assertFalse(config.desktop)
         assertTrue(config.enablePullToRefresh)
         assertFalse(config.enableViBinding)
+        assertFalse(config.enableRemoteAccess)
+    }
+
+    @Test
+    fun `enableRemoteAccess round trips`() {
+        config.enableRemoteAccess = true
+        assertTrue(config.enableRemoteAccess)
+        config.enableRemoteAccess = false
+        assertFalse(config.enableRemoteAccess)
     }
 
     @Test
