@@ -34,4 +34,6 @@ data class DomainConfigurationData(
     var translationMode: TranslationMode? = null,
     var customCss: String? = null,
     var postLoadJavascript: String? = null,
+    // Per-site permissions (null = ask every time)
+    var microphonePermission: Boolean? = null,
 )

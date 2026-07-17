@@ -52,8 +52,8 @@ import info.plateaukao.einkbro.view.dialog.DialogManager
 
 object HelperUnit {
     private const val REQUEST_CODE_ASK_PERMISSIONS = 123
-    private const val REQUEST_CODE_ASK_PERMISSIONS_1 = 1234
     private const val REQUEST_CODE_LOCATION_PERMISSION = 1235
+    private const val REQUEST_CODE_RECORD_AUDIO_PERMISSION = 1236
 
     // --- Forwarding functions for MarkdownParser ---
     fun parseMarkdown(markdownText: String): AnnotatedString =
@@ -112,16 +112,31 @@ object HelperUnit {
         return false
     }
 
-    @JvmStatic
-    fun grantPermissionsMicrophone(activity: Activity) {
-        val hasRecordAudioPermission =
-            activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
-        if (hasRecordAudioPermission != PackageManager.PERMISSION_GRANTED) {
-            activity.requestPermissions(
-                arrayOf(Manifest.permission.RECORD_AUDIO),
-                REQUEST_CODE_ASK_PERMISSIONS_1
-            )
+    private var pendingRecordAudioPermissionAction: ((Boolean) -> Unit)? = null
+
+    /**
+     * Run [onResult] with whether RECORD_AUDIO is held, asking the user first when
+     * necessary. The hosting activity must forward onRequestPermissionsResult to
+     * [handlePermissionsResult]; until then [onResult] stays pending.
+     */
+    fun requestRecordAudioPermission(activity: Activity, onResult: (Boolean) -> Unit) {
+        val hasRecordAudio = activity.checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+        if (hasRecordAudio == PackageManager.PERMISSION_GRANTED) {
+            onResult(true)
+            return
         }
+
+        pendingRecordAudioPermissionAction?.invoke(false)
+        pendingRecordAudioPermissionAction = onResult
+        activity.requestPermissions(
+            arrayOf(Manifest.permission.RECORD_AUDIO),
+            REQUEST_CODE_RECORD_AUDIO_PERMISSION
+        )
+    }
+
+    private fun resolvePendingRecordAudioPermission(granted: Boolean) {
+        pendingRecordAudioPermissionAction?.invoke(granted)
+        pendingRecordAudioPermissionAction = null
     }
 
     @JvmStatic
@@ -155,11 +170,18 @@ object HelperUnit {
     }
 
     fun handlePermissionsResult(requestCode: Int, grantResults: IntArray): Boolean {
-        if (requestCode != REQUEST_CODE_LOCATION_PERMISSION) return false
-        resolvePendingLocationPermission(
-            grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
-        )
-        return true
+        val granted = grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED
+        return when (requestCode) {
+            REQUEST_CODE_LOCATION_PERMISSION -> {
+                resolvePendingLocationPermission(granted)
+                true
+            }
+            REQUEST_CODE_RECORD_AUDIO_PERMISSION -> {
+                resolvePendingRecordAudioPermission(granted)
+                true
+            }
+            else -> false
+        }
     }
 
     private fun resolvePendingLocationPermission(granted: Boolean) {

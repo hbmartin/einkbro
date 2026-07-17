@@ -534,6 +534,8 @@
     <string name="white_background">Білий фон</string>
     <string name="site_force_viewport_width">Примусова ширина viewport (px)</string>
     <string name="site_force_viewport_width_hint">Використовуйте, лише якщо desktop UA недостатньо</string>
+    <string name="site_microphone">Мікрофон</string>
+    <string name="site_microphone_permission_prompt">Дозволити %s використовувати мікрофон?</string>
     <string name="setting_title_gdrive_sync">Синхронізація з Google Диском</string>
     <string name="setting_summary_gdrive_sync">Резервне копіювання та відновлення даних застосунку у вашому Google Диску</string>
     <string name="drive_upload_backup">Завантажити резервну копію на Google Диск</string>

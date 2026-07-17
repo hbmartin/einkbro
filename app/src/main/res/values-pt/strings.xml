@@ -534,6 +534,8 @@
     <string name="setting_summary_zoom_in_custom_view">Ativar zoom com 2 dedos em modo ecrã completo (predefinição: falso)</string>
     <string name="site_force_viewport_width">Forçar largura da viewport (px)</string>
     <string name="site_force_viewport_width_hint">Use apenas se o UA de desktop não for suficiente</string>
+    <string name="site_microphone">Microfone</string>
+    <string name="site_microphone_permission_prompt">Permitir que %s use o microfone?</string>
     <string name="setting_title_gdrive_sync">Sincronizar com o Google Drive</string>
     <string name="setting_summary_gdrive_sync">Faça backup ou restaure os dados do app no seu Google Drive</string>
     <string name="drive_upload_backup">Enviar backup para o Google Drive</string>

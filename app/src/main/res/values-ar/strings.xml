@@ -543,6 +543,8 @@
     <string name="setting_summary_zoom_in_custom_view">تفعيل التكبير بإصبعين في وضع ملء الشاشة (الافتراضي: معطل)</string>
     <string name="site_force_viewport_width">فرض عرض النافذة (بكسل)</string>
     <string name="site_force_viewport_width_hint">استخدم فقط إذا كان وكيل المستخدم لسطح المكتب غير كافٍ</string>
+    <string name="site_microphone">الميكروفون</string>
+    <string name="site_microphone_permission_prompt">هل تسمح لـ %s باستخدام الميكروفون؟</string>
     <string name="setting_title_gdrive_sync">المزامنة مع Google Drive</string>
     <string name="setting_summary_gdrive_sync">انسخ بيانات التطبيق احتياطيًا أو استعدها في Google Drive</string>
     <string name="drive_upload_backup">رفع النسخة الاحتياطية إلى Google Drive</string>

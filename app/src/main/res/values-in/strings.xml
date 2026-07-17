@@ -596,6 +596,8 @@
     <string name="setting_title_default_ai_engine">Mesin AI bawaan</string>
     <string name="site_force_viewport_width">Paksa lebar viewport (px)</string>
     <string name="site_force_viewport_width_hint">Gunakan hanya jika UA desktop saja tidak cukup</string>
+    <string name="site_microphone">Mikrofon</string>
+    <string name="site_microphone_permission_prompt">Izinkan %s menggunakan mikrofon Anda?</string>
     <string name="setting_title_gdrive_sync">Sinkronkan dengan Google Drive</string>
     <string name="setting_summary_gdrive_sync">Cadangkan atau pulihkan data aplikasi di Google Drive Anda</string>
     <string name="drive_upload_backup">Unggah cadangan ke Google Drive</string>

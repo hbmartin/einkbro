@@ -592,6 +592,8 @@
     <string name="task_unknown">未知的任務。</string>
     <string name="site_force_viewport_width">強制視窗寬度 (px)</string>
     <string name="site_force_viewport_width_hint">僅在桌面版 UA 不足時使用</string>
+    <string name="site_microphone">麥克風</string>
+    <string name="site_microphone_permission_prompt">允許 %s 使用麥克風嗎？</string>
     <string name="setting_title_gdrive_sync">與 Google Drive 同步</string>
     <string name="setting_summary_gdrive_sync">在您的 Google Drive 中備份或還原應用程式資料</string>
     <string name="drive_upload_backup">上傳備份到 Google Drive</string>

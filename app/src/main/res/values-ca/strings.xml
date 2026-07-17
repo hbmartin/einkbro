@@ -534,6 +534,8 @@
     <string name="setting_summary_zoom_in_custom_view">Activar zoom amb 2 dits en mode pantalla completa (per defecte: fals)</string>
     <string name="site_force_viewport_width">Força l\'amplada del viewport (px)</string>
     <string name="site_force_viewport_width_hint">Usa-ho només si l\'UA d\'escriptori no és suficient</string>
+    <string name="site_microphone">Micròfon</string>
+    <string name="site_microphone_permission_prompt">Voleu permetre que %s utilitzi el micròfon?</string>
     <string name="setting_title_gdrive_sync">Sincronitza amb Google Drive</string>
     <string name="setting_summary_gdrive_sync">Fes còpia de seguretat o restaura les dades de l\'aplicació al teu Google Drive</string>
     <string name="drive_upload_backup">Puja la còpia de seguretat a Google Drive</string>

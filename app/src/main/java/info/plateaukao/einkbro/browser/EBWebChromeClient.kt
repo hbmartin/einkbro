@@ -19,17 +19,23 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebView.WebViewTransport
 import android.webkit.WebViewClient
+import info.plateaukao.einkbro.R
+import info.plateaukao.einkbro.preference.ConfigManager
 import info.plateaukao.einkbro.unit.BrowserUnit
 import info.plateaukao.einkbro.unit.GithubUtil
 import info.plateaukao.einkbro.unit.HelperUnit
 import info.plateaukao.einkbro.view.EBWebView
+import info.plateaukao.einkbro.view.dialog.DialogManager
+import org.koin.core.component.KoinComponent
+import org.koin.core.component.inject
 
 class EBWebChromeClient(
     private val ebWebView: EBWebView,
     private val onReceiveFavicon: (Bitmap) -> Unit,
     private val chromeCallback: WebChromeCallback? = null,
-) : WebChromeClient() {
+) : WebChromeClient(), KoinComponent {
     private val TAG: String = "EBWebChromeClient"
+    private val config: ConfigManager by inject()
 
     private lateinit var webviewParent: ViewGroup
 
@@ -171,12 +177,54 @@ class EBWebChromeClient(
     }
 
     override fun onPermissionRequest(request: PermissionRequest?) {
-        if (request?.resources?.contains("android.webkit.resource.AUDIO_CAPTURE") == true) {
-            HelperUnit.grantPermissionsMicrophone(ebWebView.context as Activity)
-            request.grant(request.resources)
+        val permissionRequest = request ?: return
+        if (permissionRequest.resources?.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE) == true) {
+            handleAudioCaptureRequest(permissionRequest)
         } else {
-            super.onPermissionRequest(request)
+            super.onPermissionRequest(permissionRequest)
         }
+    }
+
+    private fun handleAudioCaptureRequest(request: PermissionRequest) {
+        val activity = ebWebView.context as? Activity
+        val origin = request.origin?.takeUnless { it.host.isNullOrBlank() }
+        if (activity == null || origin == null) {
+            request.deny()
+            return
+        }
+        val originString = origin.toString().removeSuffix("/")
+        when (config.getDomainConfig(originString).microphonePermission) {
+            true -> grantAudioCapture(activity, request)
+            false -> request.deny()
+            null -> DialogManager(activity).showOkCancelDialog(
+                message = activity.getString(R.string.site_microphone_permission_prompt, originString),
+                okAction = {
+                    rememberMicrophoneDecision(originString, true)
+                    grantAudioCapture(activity, request)
+                },
+                cancelAction = {
+                    rememberMicrophoneDecision(originString, false)
+                    request.deny()
+                },
+            ).setOnCancelListener { request.deny() }
+        }
+    }
+
+    // Grant only after RECORD_AUDIO is settled: a grant while the permission is
+    // still missing leaves the WebView's audio stack broken (same class of bug
+    // as geolocation in #391), and only the audio resource is ever granted.
+    private fun grantAudioCapture(activity: Activity, request: PermissionRequest) {
+        HelperUnit.requestRecordAudioPermission(activity) { granted ->
+            if (granted) {
+                request.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE))
+            } else {
+                request.deny()
+            }
+        }
+    }
+
+    private fun rememberMicrophoneDecision(url: String, allowed: Boolean) {
+        config.updateDomainConfig(config.getDomainConfig(url).apply { microphonePermission = allowed })
     }
 
     override fun onGeolocationPermissionsShowPrompt(

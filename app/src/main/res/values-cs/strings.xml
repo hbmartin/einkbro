@@ -539,6 +539,8 @@
     <string name="setting_summary_zoom_in_custom_view">Zapnout přiblížení dvěma prsty v režimu celé obrazovky (výchozí: vypnuto)</string>
     <string name="site_force_viewport_width">Vynutit šířku viewportu (px)</string>
     <string name="site_force_viewport_width_hint">Použijte, jen když desktopový UA nestačí</string>
+    <string name="site_microphone">Mikrofon</string>
+    <string name="site_microphone_permission_prompt">Povolit %s používat mikrofon?</string>
     <string name="setting_title_gdrive_sync">Synchronizovat s Google Diskem</string>
     <string name="setting_summary_gdrive_sync">Zálohujte nebo obnovte data aplikace na svém Google Disku</string>
     <string name="drive_upload_backup">Nahrát zálohu na Google Disk</string>

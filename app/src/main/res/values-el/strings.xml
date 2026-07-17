@@ -543,6 +543,8 @@
     <string name="setting_summary_zoom_in_custom_view">Ενεργοποίηση μεγέθυνσης με 2 δάχτυλα σε πλήρη οθόνη (προεπιλογή: ανενεργό)</string>
     <string name="site_force_viewport_width">Επιβολή πλάτους viewport (px)</string>
     <string name="site_force_viewport_width_hint">Χρησιμοποιήστε μόνο αν το desktop UA δεν αρκεί</string>
+    <string name="site_microphone">Μικρόφωνο</string>
+    <string name="site_microphone_permission_prompt">Να επιτρέπεται στο %s να χρησιμοποιεί το μικρόφωνό σας;</string>
     <string name="setting_title_gdrive_sync">Συγχρονισμός με το Google Drive</string>
     <string name="setting_summary_gdrive_sync">Δημιουργία αντιγράφου ασφαλείας ή επαναφορά δεδομένων εφαρμογής στο Google Drive σας</string>
     <string name="drive_upload_backup">Μεταφόρτωση αντιγράφου ασφαλείας στο Google Drive</string>

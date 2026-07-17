@@ -526,6 +526,8 @@
     <string name="volume_double_click_back_summary">双击音量键可返回；单击会在短暂延迟后翻页。需要开启音量键翻页。</string>
     <string name="site_force_viewport_width">强制视口宽度 (px)</string>
     <string name="site_force_viewport_width_hint">仅当桌面UA不足时使用</string>
+    <string name="site_microphone">麦克风</string>
+    <string name="site_microphone_permission_prompt">允许 %s 使用麦克风吗？</string>
     <string name="search_settings_hint">搜索设置…</string>
     <string name="setting_section_toolbar">工具栏</string>
     <string name="setting_section_statusbar">信息栏</string>

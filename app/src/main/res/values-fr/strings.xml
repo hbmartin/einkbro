@@ -544,6 +544,8 @@
     <string name="audio_only_mode">Audio uniquement</string>
     <string name="site_force_viewport_width">Forcer la largeur du viewport (px)</string>
     <string name="site_force_viewport_width_hint">À utiliser uniquement si l\'UA bureau ne suffit pas</string>
+    <string name="site_microphone">Microphone</string>
+    <string name="site_microphone_permission_prompt">Autoriser %s à utiliser votre microphone ?</string>
     <string name="setting_title_gdrive_sync">Synchroniser avec Google Drive</string>
     <string name="setting_summary_gdrive_sync">Sauvegarder ou restaurer les données de l\'application dans votre Google Drive</string>
     <string name="drive_upload_backup">Envoyer la sauvegarde vers Google Drive</string>

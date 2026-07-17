@@ -541,6 +541,8 @@
     <string name="setting_title_default_ai_engine">デフォルトのAIエンジン</string>
     <string name="site_force_viewport_width">ビューポート幅を強制 (px)</string>
     <string name="site_force_viewport_width_hint">デスクトップUAだけで足りない場合にのみ使用</string>
+    <string name="site_microphone">マイク</string>
+    <string name="site_microphone_permission_prompt">%s にマイクの使用を許可しますか？</string>
     <string name="setting_title_gdrive_sync">Google Drive と同期</string>
     <string name="setting_summary_gdrive_sync">アプリのデータを Google Drive にバックアップ・復元します</string>
     <string name="drive_upload_backup">バックアップを Google Drive にアップロード</string>

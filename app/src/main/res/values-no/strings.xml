@@ -543,6 +543,8 @@
     <string name="white_background">Hvit bakgrunn</string>
     <string name="site_force_viewport_width">Tving viewport-bredde (px)</string>
     <string name="site_force_viewport_width_hint">Bruk kun hvis skrivebords-UA alene ikke er nok</string>
+    <string name="site_microphone">Mikrofon</string>
+    <string name="site_microphone_permission_prompt">Vil du la %s bruke mikrofonen din?</string>
     <string name="setting_title_gdrive_sync">Synkroniser med Google Disk</string>
     <string name="setting_summary_gdrive_sync">Sikkerhetskopier eller gjenopprett appdata i Google Disk</string>
     <string name="drive_upload_backup">Last opp sikkerhetskopi til Google Disk</string>

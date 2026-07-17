@@ -535,6 +535,8 @@
     <string name="setting_summary_zoom_in_custom_view">Włącz powiększanie dwoma palcami w trybie pełnoekranowym (domyślnie: wył.)</string>
     <string name="site_force_viewport_width">Wymuś szerokość viewportu (px)</string>
     <string name="site_force_viewport_width_hint">Użyj tylko gdy desktopowy UA nie wystarcza</string>
+    <string name="site_microphone">Mikrofon</string>
+    <string name="site_microphone_permission_prompt">Zezwolić %s na używanie mikrofonu?</string>
     <string name="setting_title_gdrive_sync">Synchronizuj z Dyskiem Google</string>
     <string name="setting_summary_gdrive_sync">Utwórz kopię zapasową lub przywróć dane aplikacji na Dysku Google</string>
     <string name="drive_upload_backup">Prześlij kopię zapasową na Dysk Google</string>

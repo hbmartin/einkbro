@@ -338,6 +338,8 @@
     <string name="site_post_load_js">Post-Load JavaScript</string>
     <string name="site_force_viewport_width">Force viewport width (px)</string>
     <string name="site_force_viewport_width_hint">Use only if desktop UA alone is not enough</string>
+    <string name="site_microphone">Microphone</string>
+    <string name="site_microphone_permission_prompt">Allow %s to use your microphone?</string>
     <string name="setting_title_toolbar_position">Toolbar position</string>
     <string name="toolbar_position_bottom">Bottom</string>
     <string name="toolbar_position_top">Top</string>

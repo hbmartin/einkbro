@@ -40,6 +40,8 @@ import androidx.compose.material.icons.outlined.Copyright
 import androidx.compose.material.icons.outlined.DoNotDisturbOff
 import androidx.compose.material.icons.outlined.InvertColors
 import androidx.compose.material.icons.outlined.InvertColorsOff
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.MicOff
 import androidx.compose.material.icons.outlined.Remove
 import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material.icons.twotone.Cookie
@@ -152,6 +154,7 @@ fun SiteSettingsContent(
     var javascript by remember { mutableStateOf(domainConfig.enableJavascript) }
     var adBlock by remember { mutableStateOf(domainConfig.enableAdBlock) }
     var cookies by remember { mutableStateOf(domainConfig.enableCookies) }
+    var microphonePermission by remember { mutableStateOf(domainConfig.microphonePermission) }
     var translateSite by remember { mutableStateOf(domainConfig.shouldTranslateSite) }
     var translationMode by remember { mutableStateOf(domainConfig.translationMode) }
     var customCss by remember { mutableStateOf(domainConfig.customCss.orEmpty()) }
@@ -170,6 +173,7 @@ fun SiteSettingsContent(
         javascript != null,
         adBlock != null,
         cookies != null,
+        microphonePermission != null,
         translateSite,
         customCss.isNotBlank(),
         postLoadJs.isNotBlank(),
@@ -321,6 +325,17 @@ fun SiteSettingsContent(
                 onValueChange = { cookies = it },
             )
 
+            // Microphone (no global setting: default is asking per request)
+            NullableBooleanRow(
+                label = stringResource(R.string.site_microphone),
+                value = microphonePermission,
+                globalValue = false,
+                defaultOnActivate = true,
+                onIcon = Icons.Outlined.Mic,
+                offIcon = Icons.Outlined.MicOff,
+                onValueChange = { microphonePermission = it },
+            )
+
             SectionHeader(stringResource(R.string.action_category_translation))
 
             // Translation: checkbox (always translate) on its own row, mode dropdown nested below
@@ -361,7 +376,7 @@ fun SiteSettingsContent(
                 onClick = {
                     fontSize = null; fontType = null; boldFont = null; blackFont = null
                     fontBoldness = null; desktopMode = null; viewportWidth = null; javascript = null
-                    adBlock = null; cookies = null
+                    adBlock = null; cookies = null; microphonePermission = null
                     whiteBackground = false; invertColor = false
                     translateSite = false; translationMode = null
                     customCss = ""; postLoadJs = ""
@@ -387,6 +402,7 @@ fun SiteSettingsContent(
                         enableJavascript = javascript,
                         enableAdBlock = adBlock,
                         enableCookies = cookies,
+                        microphonePermission = microphonePermission,
                         shouldTranslateSite = translateSite,
                         translationMode = translationMode,
                         customCss = customCss.ifBlank { null },

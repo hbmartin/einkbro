@@ -1,5 +1,6 @@
 package info.plateaukao.einkbro.preference
 
+import info.plateaukao.einkbro.database.DomainConfigurationData
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
@@ -131,5 +132,36 @@ class SerializableDataTest {
     @Test
     fun `RecentBookmark parsing returns null for malformed string`() {
         assertNull("name::url-only".toRecentBookmark())
+    }
+
+    // ── DomainConfigurationData (JSON column of the domain_configuration table) ──
+
+    // Same configuration BookmarkManager uses for the domain_configuration rows.
+    private val domainConfigJson = Json {
+        encodeDefaults = true
+        ignoreUnknownKeys = true
+    }
+
+    @Test
+    fun `DomainConfigurationData decodes legacy JSON missing microphonePermission`() {
+        val decoded = domainConfigJson.decodeFromString<DomainConfigurationData>(
+            """{"domain":"example.com","shouldFixScroll":true}"""
+        )
+        assertEquals("example.com", decoded.domain)
+        assertNull(decoded.microphonePermission)
+    }
+
+    @Test
+    fun `DomainConfigurationData microphone decision round trips through Json`() {
+        listOf(true, false).forEach { allowed ->
+            val config = DomainConfigurationData(
+                domain = "example.com",
+                microphonePermission = allowed,
+            )
+            val decoded = domainConfigJson.decodeFromString<DomainConfigurationData>(
+                domainConfigJson.encodeToString(config)
+            )
+            assertEquals(config, decoded)
+        }
     }
 }

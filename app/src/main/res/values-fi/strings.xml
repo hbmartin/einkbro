@@ -543,6 +543,8 @@
     <string name="white_background">Valkoinen tausta</string>
     <string name="site_force_viewport_width">Pakota näkymän leveys (px)</string>
     <string name="site_force_viewport_width_hint">Käytä vain jos pelkkä työpöytä-UA ei riitä</string>
+    <string name="site_microphone">Mikrofoni</string>
+    <string name="site_microphone_permission_prompt">Sallitaanko sivuston %s käyttää mikrofonia?</string>
     <string name="setting_title_gdrive_sync">Synkronoi Google Driven kanssa</string>
     <string name="setting_summary_gdrive_sync">Varmuuskopioi tai palauta sovelluksen tiedot Google Drivessa</string>
     <string name="drive_upload_backup">Lähetä varmuuskopio Google Driveen</string>
