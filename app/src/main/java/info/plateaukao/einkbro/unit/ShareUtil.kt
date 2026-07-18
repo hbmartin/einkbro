@@ -144,8 +144,10 @@ object ShareUtil : KoinComponent {
         stopBroadcast()
 
         scope.launch(Dispatchers.IO) {
+            var server: ServerSocket? = null
+            var client: Socket? = null
             try {
-                val server = ServerSocket(0)
+                server = ServerSocket(0)
                 serverSocket = server
                 val port = server.localPort
                 val localIp = getLocalIpAddress() ?: return@launch
@@ -154,15 +156,16 @@ object ShareUtil : KoinComponent {
                 startBroadcastingUrl(scope, "$BACKUP_PREFIX$localIp:$port", times)
 
                 // serve the file to the first client that connects
-                val client = server.accept()
+                client = server.accept()
                 client.getOutputStream().use { os ->
                     file.inputStream().use { it.copyTo(os) }
                 }
-                client.close()
-                server.close()
-                serverSocket = null
             } catch (e: Exception) {
                 e.printStackTrace()
+            } finally {
+                try { client?.close() } catch (_: Exception) {}
+                try { server?.close() } catch (_: Exception) {}
+                if (serverSocket === server) stopBroadcast()
             }
         }
     }

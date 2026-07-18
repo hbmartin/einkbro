@@ -39,6 +39,7 @@ import io.github.edsuns.adfilter.AdFilter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import info.plateaukao.einkbro.viewmodel.ActionModeMenuViewModel
 import info.plateaukao.einkbro.viewmodel.ExternalSearchViewModel
@@ -111,7 +112,20 @@ class EinkBroApplication : Application() {
         // Load the encrypted secret store and sweep any plaintext secrets out of the
         // default SharedPreferences off the main thread; on-demand access is safe too
         // (first reader pays the load under a lock).
-        appScope.launch { secretStore.prime() }
+        appScope.launch {
+            repeat(SECRET_STORE_PRIME_ATTEMPTS) { attempt ->
+                try {
+                    secretStore.prime()
+                    return@launch
+                } catch (e: Exception) {
+                    if (attempt == SECRET_STORE_PRIME_ATTEMPTS - 1) {
+                        Timber.e(e, "Secret store initialization failed")
+                    } else {
+                        delay(SECRET_STORE_RETRY_DELAY_MS shl attempt)
+                    }
+                }
+            }
+        }
 
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
 
@@ -235,4 +249,8 @@ class EinkBroApplication : Application() {
         return super.getPackageName()
     }
 
+    private companion object {
+        const val SECRET_STORE_PRIME_ATTEMPTS = 3
+        const val SECRET_STORE_RETRY_DELAY_MS = 250L
+    }
 }

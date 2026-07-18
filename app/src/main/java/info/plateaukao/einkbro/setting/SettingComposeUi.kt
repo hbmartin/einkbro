@@ -71,10 +71,12 @@ import info.plateaukao.einkbro.BuildConfig
 import info.plateaukao.einkbro.R
 import info.plateaukao.einkbro.preference.EinkImageAdjustment
 import info.plateaukao.einkbro.preference.EinkImageMode
+import info.plateaukao.einkbro.preference.SecretStorageException
 import info.plateaukao.einkbro.preference.ToolbarPosition
 import info.plateaukao.einkbro.preference.toggle
 import info.plateaukao.einkbro.unit.EinkImageProcessor
 import info.plateaukao.einkbro.unit.ViewUnit
+import info.plateaukao.einkbro.view.EBToast
 import info.plateaukao.einkbro.view.dialog.DialogManager
 import info.plateaukao.einkbro.view.dialog.compose.HorizontalSeparator
 import kotlinx.coroutines.Dispatchers
@@ -244,6 +246,7 @@ fun <T> ValueSettingItemUi(
     showValue: Boolean = true,
 ) {
     val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
     val currentValue = remember(setting) { mutableStateOf(setting.config.get()) }
     SettingItemUi(
         setting = setting,
@@ -256,14 +259,19 @@ fun <T> ValueSettingItemUi(
                 setting.summaryResId,
                 setting.config.get()
             ) ?: return@launch
-            @Suppress("UNCHECKED_CAST")
-            if (setting.config.get() is Int) {
-                val intValue = value.toIntOrNull() ?: return@launch
-                setting.config.set(intValue as T)
-                currentValue.value = intValue as T
-            } else {
-                setting.config.set(value as T)
-                currentValue.value = value as T
+            try {
+                @Suppress("UNCHECKED_CAST")
+                val updatedValue = if (currentValue.value is Int) {
+                    value.toIntOrNull() as T? ?: return@launch
+                } else {
+                    value as T
+                }
+                withContext(Dispatchers.IO) {
+                    setting.config.set(updatedValue)
+                }
+                currentValue.value = updatedValue
+            } catch (_: SecretStorageException) {
+                EBToast.show(context, R.string.toast_error)
             }
         }
     }

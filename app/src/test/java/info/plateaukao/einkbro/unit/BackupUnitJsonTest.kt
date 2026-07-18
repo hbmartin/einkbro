@@ -8,6 +8,8 @@ import info.plateaukao.einkbro.preference.FakeSecretPrefs
 import info.plateaukao.einkbro.preference.FakeSharedPreferences
 import info.plateaukao.einkbro.preference.SecretPrefs
 import io.mockk.mockk
+import io.mockk.every
+import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
 import org.json.JSONObject
 import org.junit.After
@@ -41,11 +43,13 @@ class BackupUnitJsonTest {
     private lateinit var fakeSp: FakeSharedPreferences
     private lateinit var fakeSecrets: FakeSecretPrefs
     private lateinit var backupUnit: BackupUnit
+    private lateinit var dataDir: File
 
     @Before
     fun setUp() {
         fakeSp = FakeSharedPreferences()
         fakeSecrets = FakeSecretPrefs()
+        dataDir = tempFolder.newFolder("app-data")
         startKoin {
             modules(
                 module {
@@ -54,7 +58,10 @@ class BackupUnitJsonTest {
                 }
             )
         }
-        backupUnit = BackupUnit(mockk<Context>(relaxed = true))
+        val context = mockk<Context>(relaxed = true)
+        every { context.dataDir } returns dataDir
+        every { context.packageName } returns "info.plateaukao.einkbro"
+        backupUnit = BackupUnit(context)
     }
 
     @After
@@ -169,6 +176,133 @@ class BackupUnitJsonTest {
     @Test
     fun `getAvailableCategories returns null for legacy zip without manifest`() {
         assertNull(backupUnit.getAvailableCategories(createBackupZip(manifest = null)))
+    }
+
+    @Test
+    fun `getAvailableCategories rejects an oversized manifest instead of treating it as legacy`() {
+        val file = tempFolder.newFile("oversized-manifest.zip")
+        ZipOutputStream(file.outputStream()).use { zos ->
+            zos.putNextEntry(ZipEntry("_manifest.json"))
+            zos.write(
+                JSONObject()
+                    .put("version", 2)
+                    .put("categories", JSONArray(listOf("BOOKMARKS")))
+                    .put("padding", "x".repeat(70_000))
+                    .toString()
+                    .toByteArray()
+            )
+            zos.closeEntry()
+        }
+
+        assertEquals(emptySet<BackupCategory>(), backupUnit.getAvailableCategories(file))
+    }
+
+    @Test
+    fun `restore rejects preference entries that escape their directory`() {
+        val file = tempFolder.newFile("traversal.zip")
+        ZipOutputStream(file.outputStream()).use { zos ->
+            zos.putNextEntry(ZipEntry("_manifest.json"))
+            zos.write(
+                JSONObject()
+                    .put("version", 2)
+                    .put("categories", JSONArray(listOf("ALL_PREFERENCES")))
+                    .toString()
+                    .toByteArray()
+            )
+            zos.closeEntry()
+            zos.putNextEntry(ZipEntry("shared_prefs/../databases/overwritten.txt"))
+            zos.write("attacker-controlled".toByteArray())
+            zos.closeEntry()
+        }
+
+        val restored = runBlocking {
+            backupUnit.restoreBackupData(file, setOf(BackupCategory.ALL_PREFERENCES))
+        }
+
+        assertFalse(restored)
+        assertFalse(File(dataDir, "databases/overwritten.txt").exists())
+    }
+
+    @Test
+    fun `restore accepts a normal preference basename`() {
+        val file = tempFolder.newFile("preferences.zip")
+        ZipOutputStream(file.outputStream()).use { zos ->
+            zos.putNextEntry(ZipEntry("_manifest.json"))
+            zos.write(
+                JSONObject()
+                    .put("version", 2)
+                    .put("categories", JSONArray(listOf("ALL_PREFERENCES")))
+                    .toString()
+                    .toByteArray()
+            )
+            zos.closeEntry()
+            zos.putNextEntry(ZipEntry("shared_prefs/other.xml"))
+            zos.write("legitimate".toByteArray())
+            zos.closeEntry()
+        }
+
+        val restored = runBlocking {
+            backupUnit.restoreBackupData(file, setOf(BackupCategory.ALL_PREFERENCES))
+        }
+
+        assertTrue(restored)
+        assertEquals("legitimate", File(dataDir, "shared_prefs/other.xml").readText())
+    }
+
+    @Test
+    fun `restored default preferences migrate secrets before reaching disk`() {
+        val file = tempFolder.newFile("legacy-preferences.zip")
+        val xml = """
+            <?xml version='1.0' encoding='utf-8' standalone='yes' ?>
+            <map>
+                <string name="${AiConfig.K_GPT_API_KEY}">legacy-secret</string>
+                <string name="unrelated">keep-me</string>
+            </map>
+        """.trimIndent()
+        ZipOutputStream(file.outputStream()).use { zos ->
+            zos.putNextEntry(ZipEntry("_manifest.json"))
+            zos.write(
+                JSONObject()
+                    .put("version", 2)
+                    .put("categories", JSONArray(listOf("ALL_PREFERENCES")))
+                    .toString()
+                    .toByteArray()
+            )
+            zos.closeEntry()
+            zos.putNextEntry(ZipEntry("shared_prefs/old.package_preferences.xml"))
+            zos.write(xml.toByteArray())
+            zos.closeEntry()
+        }
+
+        val restored = runBlocking {
+            backupUnit.restoreBackupData(file, setOf(BackupCategory.ALL_PREFERENCES))
+        }
+
+        val restoredXml = File(
+            dataDir,
+            "shared_prefs/info.plateaukao.einkbro_preferences.xml",
+        ).readText()
+        assertTrue(restored)
+        assertEquals("legacy-secret", fakeSecrets.values[AiConfig.K_GPT_API_KEY])
+        assertFalse(restoredXml.contains(AiConfig.K_GPT_API_KEY))
+        assertTrue(restoredXml.contains("keep-me"))
+    }
+
+    @Test
+    fun `secrets envelope rejects excessive uncompressed data`() {
+        val file = tempFolder.newFile("oversized-secrets.zip")
+        ZipOutputStream(file.outputStream()).use { zos ->
+            zos.putNextEntry(ZipEntry("secrets.enc"))
+            zos.write(
+                JSONObject()
+                    .put("padding", "x".repeat(300_000))
+                    .toString()
+                    .toByteArray()
+            )
+            zos.closeEntry()
+        }
+
+        assertNull(backupUnit.readSecretsEnvelope(file))
     }
 
     // ── GPT settings export/import ───────────────────────────────────────────

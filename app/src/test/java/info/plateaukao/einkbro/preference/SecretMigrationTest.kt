@@ -3,6 +3,7 @@ package info.plateaukao.einkbro.preference
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class SecretMigrationTest {
@@ -32,5 +33,20 @@ class SecretMigrationTest {
         assertFalse(plain.contains("sp_drive_pending_auth"))
         assertEquals("keep-me", plain.getString("unrelated", null))
         assertFalse(SecretMigration.sweep(plain, encrypted))
+    }
+
+    @Test
+    fun `sweep fails when plaintext deletion is not committed`() {
+        val plain = FakeSharedPreferences().apply {
+            store[AiConfig.K_GPT_API_KEY] = "api-key"
+            commitSucceeds = false
+        }
+        val encrypted = FakeSecretPrefs()
+
+        assertThrows(IllegalStateException::class.java) {
+            SecretMigration.sweep(plain, encrypted)
+        }
+
+        assertTrue(plain.contains(AiConfig.K_GPT_API_KEY))
     }
 }

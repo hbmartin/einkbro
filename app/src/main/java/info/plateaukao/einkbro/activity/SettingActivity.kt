@@ -161,11 +161,12 @@ class SettingActivity : FragmentActivity(), BackupOps {
 
     private val exportBackupLauncher: ActivityResultLauncher<Intent> =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
-            val uri: Uri = result.data?.data ?: return@registerForActivityResult
+            val uri = result.data?.data
             val categories = pendingBackupCategories
             val passphrase = pendingBackupPassphrase
             pendingBackupCategories = emptySet()
             pendingBackupPassphrase = null
+            if (uri == null) return@registerForActivityResult
             if (categories.isNotEmpty()) {
                 lifecycleScope.launch {
                     backupUnit.backupData(this@SettingActivity, uri, categories, passphrase)
@@ -181,16 +182,22 @@ class SettingActivity : FragmentActivity(), BackupOps {
                 if (backupUnit.restoreLegacyBackupData(this, uri)) {
                     dialogManager.showRestartConfirmDialog()
                 }
+            } else if (available.isEmpty()) {
+                EBToast.show(this, R.string.toast_error)
             } else {
                 dialogManager.showRestoreCategoryDialog(available) { selected ->
                     lifecycleScope.launch {
-                        val restored = restoreCategories(
-                            selected,
-                            restoreOthers = { backupUnit.restoreBackupData(this@SettingActivity, uri, it) },
-                            readSecretsEnvelope = { backupUnit.readSecretsEnvelope(this@SettingActivity, uri) },
-                        )
-                        if (restored) {
-                            dialogManager.showRestartConfirmDialog()
+                        try {
+                            val restored = restoreCategories(
+                                selected,
+                                restoreOthers = { backupUnit.restoreBackupData(this@SettingActivity, uri, it) },
+                                readSecretsEnvelope = { backupUnit.readSecretsEnvelope(this@SettingActivity, uri) },
+                            )
+                            if (restored) {
+                                dialogManager.showRestartConfirmDialog()
+                            }
+                        } catch (_: Exception) {
+                            EBToast.show(this@SettingActivity, R.string.toast_error)
                         }
                     }
                 }
@@ -417,44 +424,63 @@ class SettingActivity : FragmentActivity(), BackupOps {
                 backupUnit.backupToTempFile(effective, secretsPassphrase = passphrase)
             } ?: return@launch
             ShareUtil.startServingFile(lifecycleScope, tempFile)
-            dialogManager.showOkCancelDialog(
+            val dialog = dialogManager.showOkCancelDialog(
                 title = getString(R.string.setting_title_share_appData),
                 message = getString(R.string.share_broadcasting),
-                okAction = { ShareUtil.stopBroadcast(); tempFile.delete() },
+                okAction = {},
                 showNegativeButton = false,
             )
+            dialog.setOnDismissListener {
+                ShareUtil.stopBroadcast()
+                tempFile.delete()
+            }
         }
     }
 
     override fun receiveAppData() {
         val tempFile = java.io.File(cacheDir, "backup_receive.zip")
+        var received = false
         val dialog = dialogManager.showOkCancelDialog(
             title = getString(R.string.setting_title_receive_appData),
             message = getString(R.string.share_waiting),
-            okAction = { ShareUtil.stopBroadcast() },
+            okAction = {},
             showNegativeButton = false,
         )
+        dialog.setOnDismissListener {
+            ShareUtil.stopBroadcast()
+            if (!received) tempFile.delete()
+        }
 
         ShareUtil.startReceivingFile(lifecycleScope, tempFile, onConnected = {
             dialog.findViewById<android.widget.TextView>(android.R.id.message)?.text =
                 getString(R.string.share_receiving)
         }) { file ->
+            received = true
             dialog.dismiss()
             val available = backupUnit.getAvailableCategories(file)
-            if (available != null) {
-                dialogManager.showRestoreCategoryDialog(available) { selected ->
-                    lifecycleScope.launch {
-                        val restored = restoreCategories(
-                            selected,
-                            restoreOthers = { backupUnit.restoreBackupData(file, it) },
-                            readSecretsEnvelope = { backupUnit.readSecretsEnvelope(file) },
-                        )
-                        if (restored) {
-                            dialogManager.showRestartConfirmDialog()
+            if (!available.isNullOrEmpty()) {
+                dialogManager.showRestoreCategoryDialog(
+                    available,
+                    onSelected = { selected ->
+                        lifecycleScope.launch {
+                            try {
+                                val restored = restoreCategories(
+                                    selected,
+                                    restoreOthers = { backupUnit.restoreBackupData(file, it) },
+                                    readSecretsEnvelope = { backupUnit.readSecretsEnvelope(file) },
+                                )
+                                if (restored) {
+                                    dialogManager.showRestartConfirmDialog()
+                                }
+                            } catch (_: Exception) {
+                                EBToast.show(this@SettingActivity, R.string.toast_error)
+                            } finally {
+                                file.delete()
+                            }
                         }
-                        file.delete()
-                    }
-                }
+                    },
+                    onCancelled = { file.delete() },
+                )
             } else {
                 file.delete()
             }
@@ -604,19 +630,28 @@ class SettingActivity : FragmentActivity(), BackupOps {
                 tempFile.delete()
                 return@launchDriveOp
             }
-            dialogManager.showRestoreCategoryDialog(available) { selected ->
-                lifecycleScope.launch {
-                    val restored = restoreCategories(
-                        selected,
-                        restoreOthers = { backupUnit.restoreBackupData(tempFile, it) },
-                        readSecretsEnvelope = { backupUnit.readSecretsEnvelope(tempFile) },
-                    )
-                    if (restored) {
-                        dialogManager.showRestartConfirmDialog()
+            dialogManager.showRestoreCategoryDialog(
+                available,
+                onSelected = { selected ->
+                    lifecycleScope.launch {
+                        try {
+                            val restored = restoreCategories(
+                                selected,
+                                restoreOthers = { backupUnit.restoreBackupData(tempFile, it) },
+                                readSecretsEnvelope = { backupUnit.readSecretsEnvelope(tempFile) },
+                            )
+                            if (restored) {
+                                dialogManager.showRestartConfirmDialog()
+                            }
+                        } catch (_: Exception) {
+                            EBToast.show(this@SettingActivity, R.string.toast_error)
+                        } finally {
+                            tempFile.delete()
+                        }
                     }
-                    tempFile.delete()
-                }
-            }
+                },
+                onCancelled = { tempFile.delete() },
+            )
         } catch (e: Exception) {
             tempFile.delete()
             throw e

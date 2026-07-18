@@ -42,14 +42,19 @@ import androidx.lifecycle.setViewTreeLifecycleOwner
 import androidx.savedstate.setViewTreeSavedStateRegistryOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.vectorResource
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import androidx.documentfile.provider.DocumentFile
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.lifecycleScope
 import info.plateaukao.einkbro.R
 import info.plateaukao.einkbro.preference.ConfigManager
+import info.plateaukao.einkbro.preference.SecretStorageException
 import info.plateaukao.einkbro.unit.BackupCategory
 import info.plateaukao.einkbro.unit.BrowserUnit.restartApp
 import info.plateaukao.einkbro.unit.HelperUnit
@@ -58,6 +63,9 @@ import info.plateaukao.einkbro.unit.ViewUnit
 import info.plateaukao.einkbro.util.Constants
 import info.plateaukao.einkbro.view.EBToast
 import info.plateaukao.einkbro.view.compose.MyTheme
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import kotlin.coroutines.resume
@@ -442,12 +450,14 @@ class DialogManager(
 
     fun showRestoreCategoryDialog(
         availableCategories: Set<BackupCategory>,
+        onCancelled: () -> Unit = {},
         onSelected: (Set<BackupCategory>) -> Unit,
     ) {
         showCategoryDialog(
-            R.string.dialog_title_restore_categories,
-            availableCategories.toTypedArray(),
-            onSelected,
+            titleResId = R.string.dialog_title_restore_categories,
+            categories = availableCategories.toTypedArray(),
+            onSelected = onSelected,
+            onCancelled = onCancelled,
         )
     }
 
@@ -455,12 +465,14 @@ class DialogManager(
         titleResId: Int,
         categories: Array<BackupCategory>,
         onSelected: (Set<BackupCategory>) -> Unit,
+        onCancelled: () -> Unit = {},
     ) {
         val labels = categories.map { activity.getString(it.displayNameResId) }.toTypedArray()
         val checked = BooleanArray(categories.size) { true }
         val allPrefsIndex = categories.indexOf(BackupCategory.ALL_PREFERENCES)
         val gptIndex = categories.indexOf(BackupCategory.GPT_SETTINGS)
 
+        var accepted = false
         val dialog = AlertDialog.Builder(activity, R.style.TouchAreaDialog)
             .setTitle(titleResId)
             .setMultiChoiceItems(labels, checked) { dialogInterface, which, isChecked ->
@@ -481,7 +493,10 @@ class DialogManager(
             }
             .setPositiveButton(android.R.string.ok) { _, _ ->
                 val selected = categories.filterIndexed { i, _ -> checked[i] }.toSet()
-                if (selected.isNotEmpty()) onSelected(selected)
+                if (selected.isNotEmpty()) {
+                    accepted = true
+                    onSelected(selected)
+                }
             }
             .setNegativeButton(android.R.string.cancel, null)
             .create().apply {
@@ -493,6 +508,9 @@ class DialogManager(
             if (allPrefsIndex >= 0 && gptIndex >= 0 && checked[allPrefsIndex]) {
                 setItemEnabled(dialog, gptIndex, false)
             }
+        }
+        dialog.setOnDismissListener {
+            if (!accepted) onCancelled()
         }
         dialog.show()
     }
@@ -564,6 +582,7 @@ class DialogManager(
                             onValueChange = { passphraseState.value = it },
                             label = { Text(stringResource(R.string.backup_passphrase_hint)) },
                             visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                             modifier = Modifier.fillMaxWidth(),
                             colors = TextFieldDefaults.outlinedTextFieldColors(
                                 textColor = MaterialTheme.colors.onBackground,
@@ -575,6 +594,7 @@ class DialogManager(
                                 onValueChange = { confirmState.value = it },
                                 label = { Text(stringResource(R.string.backup_passphrase_confirm_hint)) },
                                 visualTransformation = PasswordVisualTransformation(),
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                                 modifier = Modifier.fillMaxWidth(),
                                 colors = TextFieldDefaults.outlinedTextFieldColors(
                                     textColor = MaterialTheme.colors.onBackground,
@@ -637,8 +657,18 @@ class DialogManager(
     fun showInstapaperCredentialsDialog(
         confirmAction: (username: String, password: String) -> Unit,
     ) {
-        val usernameState = mutableStateOf(config.instapaperUsername)
-        val passwordState = mutableStateOf(config.instapaperPassword)
+        val usernameState = mutableStateOf(
+            runCatching { config.instapaperUsername }.getOrElse {
+                EBToast.show(activity, R.string.toast_error)
+                ""
+            }
+        )
+        val passwordState = mutableStateOf(
+            runCatching { config.instapaperPassword }.getOrElse {
+                EBToast.show(activity, R.string.toast_error)
+                ""
+            }
+        )
         var dialogRef: Dialog? = null
 
         val composeView = ComposeView(activity).apply {
@@ -665,6 +695,7 @@ class DialogManager(
                             onValueChange = { passwordState.value = it },
                             label = { Text(stringResource(R.string.instapaper_password_hint)) },
                             visualTransformation = PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                             modifier = Modifier.fillMaxWidth(),
                             colors = TextFieldDefaults.outlinedTextFieldColors(
                                 textColor = MaterialTheme.colors.onBackground,
@@ -699,9 +730,22 @@ class DialogManager(
                 if (username.isEmpty() || password.isEmpty()) {
                     EBToast.show(activity, activity.getString(R.string.toast_input_empty))
                 } else {
-                    config.instapaperUsername = username
-                    config.instapaperPassword = password
-                    confirmAction(username, password)
+                    val owner = activity as? LifecycleOwner
+                    if (owner == null) {
+                        EBToast.show(activity, R.string.toast_error)
+                    } else {
+                        owner.lifecycleScope.launch {
+                            try {
+                                withContext(Dispatchers.IO) {
+                                    config.instapaperUsername = username
+                                    config.instapaperPassword = password
+                                }
+                                confirmAction(username, password)
+                            } catch (_: SecretStorageException) {
+                                EBToast.show(activity, R.string.toast_error)
+                            }
+                        }
+                    }
                 }
             },
             cancelAction = { ViewUnit.hideKeyboard(activity) }

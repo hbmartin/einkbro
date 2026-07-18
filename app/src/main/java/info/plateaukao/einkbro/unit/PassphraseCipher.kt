@@ -35,7 +35,7 @@ class PassphraseCipher(private val iterations: Int = DEFAULT_ITERATIONS) {
         val plain = JSONObject().apply { payload.forEach { (key, value) -> put(key, value) } }
         val cipherText = cipher.doFinal(plain.toString().toByteArray(Charsets.UTF_8))
         return JSONObject()
-            .put("version", 1)
+            .put("version", VERSION)
             .put("kdf", KDF)
             .put("iterations", iterations)
             .put("salt", salt.toByteString().base64())
@@ -46,12 +46,16 @@ class PassphraseCipher(private val iterations: Int = DEFAULT_ITERATIONS) {
     /** @return the decrypted map, or null on a wrong passphrase, tampered data,
      *  or an envelope this version cannot read. */
     fun decrypt(envelope: JSONObject, passphrase: CharArray): Map<String, String>? {
+        if (envelope.optInt("version", -1) != VERSION) return null
         if (envelope.optString("kdf") != KDF) return null
         return try {
             val salt = envelope.getString("salt").decodeBase64()?.toByteArray() ?: return null
             val iv = envelope.getString("iv").decodeBase64()?.toByteArray() ?: return null
             val data = envelope.getString("data").decodeBase64()?.toByteArray() ?: return null
-            val envelopeIterations = envelope.optInt("iterations", DEFAULT_ITERATIONS)
+            if (salt.size != SALT_LENGTH || iv.size != IV_LENGTH) return null
+            if (data.size !in MIN_CIPHERTEXT_LENGTH..MAX_CIPHERTEXT_LENGTH) return null
+            val envelopeIterations = envelope.optInt("iterations", -1)
+            if (envelopeIterations !in MIN_SUPPORTED_ITERATIONS..MAX_SUPPORTED_ITERATIONS) return null
             val cipher = Cipher.getInstance(TRANSFORMATION).apply {
                 init(Cipher.DECRYPT_MODE, deriveKey(passphrase, salt, envelopeIterations), GCMParameterSpec(TAG_BITS, iv))
                 updateAAD(AAD)
@@ -61,6 +65,8 @@ class PassphraseCipher(private val iterations: Int = DEFAULT_ITERATIONS) {
         } catch (e: GeneralSecurityException) {
             null
         } catch (e: JSONException) {
+            null
+        } catch (e: IllegalArgumentException) {
             null
         }
     }
@@ -74,16 +80,21 @@ class PassphraseCipher(private val iterations: Int = DEFAULT_ITERATIONS) {
 
     companion object {
         const val KDF = "PBKDF2WithHmacSHA1"
+        private const val VERSION = 1
 
         // Balances brute-force cost against derivation time on slow e-ink SoCs
         // (backups are an explicit user action, so ~a second is acceptable).
         const val DEFAULT_ITERATIONS = 600_000
+        const val MIN_SUPPORTED_ITERATIONS = 100_000
+        const val MAX_SUPPORTED_ITERATIONS = 1_200_000
 
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
         private const val KEY_BITS = 256
         private const val TAG_BITS = 128
         private const val SALT_LENGTH = 16
         private const val IV_LENGTH = 12
+        private const val MIN_CIPHERTEXT_LENGTH = TAG_BITS / 8
+        private const val MAX_CIPHERTEXT_LENGTH = 256 * 1024
         private val AAD = "einkbro-secrets:1".toByteArray(Charsets.UTF_8)
     }
 }

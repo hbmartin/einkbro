@@ -14,6 +14,7 @@ import android.content.SharedPreferences
 class FakeSharedPreferences : SharedPreferences {
 
     val store: MutableMap<String, Any?> = LinkedHashMap()
+    var commitSucceeds: Boolean = true
 
     override fun getAll(): MutableMap<String, *> = HashMap(store)
 
@@ -90,8 +91,8 @@ class FakeSharedPreferences : SharedPreferences {
         }
 
         override fun commit(): Boolean {
-            apply()
-            return true
+            if (commitSucceeds) apply()
+            return commitSucceeds
         }
 
         override fun apply() {

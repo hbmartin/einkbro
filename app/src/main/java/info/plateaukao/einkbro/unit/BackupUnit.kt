@@ -41,9 +41,16 @@ import org.jsoup.select.Elements
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import java.io.File
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException
+import javax.xml.parsers.DocumentBuilderFactory
+import javax.xml.transform.OutputKeys
+import javax.xml.transform.TransformerFactory
+import javax.xml.transform.dom.DOMSource
+import javax.xml.transform.stream.StreamResult
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
@@ -84,14 +91,19 @@ class BackupUnit(
         categories: Set<BackupCategory>,
         secretsPassphrase: String? = null,
     ): Boolean {
-        try {
-            val fos = context.contentResolver.openOutputStream(uri) ?: return false
-            writeBackupZip(fos, categories, secretsPassphrase)
+        return try {
+            val written = withContext(Dispatchers.IO) {
+                val fos = context.contentResolver.openOutputStream(uri) ?: return@withContext false
+                writeBackupZip(fos, categories, secretsPassphrase)
+                true
+            }
+            if (!written) return false
             EBToast.show(context, R.string.toast_backup_successful)
-            return true
-        } catch (e: IOException) {
+            true
+        } catch (e: Exception) {
             e.printStackTrace()
-            return false
+            EBToast.show(context, R.string.toast_error)
+            false
         }
     }
 
@@ -100,12 +112,15 @@ class BackupUnit(
         fileName: String = "backup_share.zip",
         secretsPassphrase: String? = null,
     ): File? {
+        val tempFile = File(context.cacheDir, fileName)
         return try {
-            val tempFile = File(context.cacheDir, fileName)
-            writeBackupZip(FileOutputStream(tempFile), categories, secretsPassphrase)
+            withContext(Dispatchers.IO) {
+                writeBackupZip(FileOutputStream(tempFile), categories, secretsPassphrase)
+            }
             tempFile
-        } catch (e: IOException) {
+        } catch (e: Exception) {
             e.printStackTrace()
+            tempFile.delete()
             null
         }
     }
@@ -303,7 +318,7 @@ class BackupUnit(
             var zipEntry = zis.nextEntry
             while (zipEntry != null) {
                 if (zipEntry.name == MANIFEST_FILE) {
-                    val content = zis.readBytes()
+                    val content = readEntryBytes(zis, MAX_MANIFEST_BYTES)
                     val manifest = JSONObject(String(content))
                     val categoriesArray = manifest.getJSONArray("categories")
                     val categories = mutableSetOf<BackupCategory>()
@@ -321,9 +336,9 @@ class BackupUnit(
             zis.close()
             fis.close()
             return null // legacy format
-        } catch (e: IOException) {
+        } catch (e: Exception) {
             e.printStackTrace()
-            return null
+            return emptySet()
         }
     }
 
@@ -343,25 +358,22 @@ class BackupUnit(
 
                     zipEntry.name.startsWith("shared_prefs/")
                             && BackupCategory.ALL_PREFERENCES in categories -> {
-                        val fileName = zipEntry.name.removePrefix("shared_prefs/")
-                        // Never overwrite the local Tink keyset with a foreign one:
-                        // that would make this device's stored secrets undecryptable.
-                        if (fileName != SecretStore.KEYSET_PREF_XML) {
-                            val file = File(sharedPrefsDir, remapPrefsFileName(fileName))
-                            writeStreamToFile(zis, file)
-                        }
+                        restorePreferencesEntry(
+                            zis,
+                            zipEntry.name.removePrefix("shared_prefs/"),
+                        )
                     }
 
                     zipEntry.name == GPT_SETTINGS_FILE
                             && BackupCategory.GPT_SETTINGS in categories
                             && BackupCategory.ALL_PREFERENCES !in categories -> {
-                        val content = zis.readBytes()
+                        val content = readEntryBytes(zis, MAX_GPT_SETTINGS_BYTES)
                         importGptSettings(JSONObject(String(content)))
                     }
 
                     zipEntry.name == BOOKMARKS_FILE
                             && BackupCategory.BOOKMARKS in categories -> {
-                        val content = zis.readBytes()
+                        val content = readEntryBytes(zis, MAX_COLLECTION_ENTRY_BYTES)
                         val bookmarks = JSONArray(String(content))
                             .toJSONObjectList()
                             .map { it.toBookmark() }
@@ -372,7 +384,7 @@ class BackupUnit(
 
                     zipEntry.name == HISTORY_FILE
                             && BackupCategory.HISTORY in categories -> {
-                        val content = zis.readBytes()
+                        val content = readEntryBytes(zis, MAX_COLLECTION_ENTRY_BYTES)
                         val jsonArray = JSONArray(String(content))
                         val records = (0 until jsonArray.length()).map { i ->
                             val obj = jsonArray.getJSONObject(i)
@@ -387,7 +399,7 @@ class BackupUnit(
 
                     zipEntry.name == DATABASE_DATA_FILE
                             && BackupCategory.DATABASE_DATA in categories -> {
-                        val content = zis.readBytes()
+                        val content = readEntryBytes(zis, MAX_DATABASE_DATA_BYTES)
                         restoreDatabaseData(JSONObject(String(content)))
                     }
                 }
@@ -408,7 +420,7 @@ class BackupUnit(
             var zipEntry = zis.nextEntry
             while (zipEntry != null) {
                 if (zipEntry.name == MANIFEST_FILE) {
-                    val content = zis.readBytes()
+                    val content = readEntryBytes(zis, MAX_MANIFEST_BYTES)
                     val manifest = JSONObject(String(content))
                     val categoriesArray = manifest.getJSONArray("categories")
                     val categories = mutableSetOf<BackupCategory>()
@@ -424,9 +436,9 @@ class BackupUnit(
             }
             zis.close()
             return null
-        } catch (e: IOException) {
+        } catch (e: Exception) {
             e.printStackTrace()
-            return null
+            return emptySet()
         }
     }
 
@@ -443,25 +455,22 @@ class BackupUnit(
 
                     zipEntry.name.startsWith("shared_prefs/")
                             && BackupCategory.ALL_PREFERENCES in categories -> {
-                        val fileName = zipEntry.name.removePrefix("shared_prefs/")
-                        // Never overwrite the local Tink keyset with a foreign one:
-                        // that would make this device's stored secrets undecryptable.
-                        if (fileName != SecretStore.KEYSET_PREF_XML) {
-                            val target = File(sharedPrefsDir, remapPrefsFileName(fileName))
-                            writeStreamToFile(zis, target)
-                        }
+                        restorePreferencesEntry(
+                            zis,
+                            zipEntry.name.removePrefix("shared_prefs/"),
+                        )
                     }
 
                     zipEntry.name == GPT_SETTINGS_FILE
                             && BackupCategory.GPT_SETTINGS in categories
                             && BackupCategory.ALL_PREFERENCES !in categories -> {
-                        val content = zis.readBytes()
+                        val content = readEntryBytes(zis, MAX_GPT_SETTINGS_BYTES)
                         importGptSettings(JSONObject(String(content)))
                     }
 
                     zipEntry.name == BOOKMARKS_FILE
                             && BackupCategory.BOOKMARKS in categories -> {
-                        val content = zis.readBytes()
+                        val content = readEntryBytes(zis, MAX_COLLECTION_ENTRY_BYTES)
                         val bookmarks = JSONArray(String(content))
                             .toJSONObjectList()
                             .map { it.toBookmark() }
@@ -472,7 +481,7 @@ class BackupUnit(
 
                     zipEntry.name == HISTORY_FILE
                             && BackupCategory.HISTORY in categories -> {
-                        val content = zis.readBytes()
+                        val content = readEntryBytes(zis, MAX_COLLECTION_ENTRY_BYTES)
                         val jsonArray = JSONArray(String(content))
                         val records = (0 until jsonArray.length()).map { i ->
                             val obj = jsonArray.getJSONObject(i)
@@ -487,7 +496,7 @@ class BackupUnit(
 
                     zipEntry.name == DATABASE_DATA_FILE
                             && BackupCategory.DATABASE_DATA in categories -> {
-                        val content = zis.readBytes()
+                        val content = readEntryBytes(zis, MAX_DATABASE_DATA_BYTES)
                         restoreDatabaseData(JSONObject(String(content)))
                     }
                 }
@@ -511,21 +520,30 @@ class BackupUnit(
 
             var zipEntry = zis.nextEntry
             while (zipEntry != null) {
-                if (zipEntry.name == SecretStore.KEYSET_PREF_XML) {
+                if (zipEntry.isDirectory) {
                     zipEntry = zis.nextEntry
                     continue
                 }
-                val file = if (zipEntry.name.endsWith(".db") ||
-                    zipEntry.name.contains("einkbro_db")
-                ) File(databasesDir, zipEntry.name)
-                else File(sharedPrefsDir, remapPrefsFileName(zipEntry.name))
-                writeStreamToFile(zis, file)
+                val fileName = requireSafeBackupBasename(zipEntry.name)
+                if (fileName == SecretStore.KEYSET_PREF_XML) {
+                    zipEntry = zis.nextEntry
+                    continue
+                }
+                if (fileName.endsWith(".db") || fileName.contains("einkbro_db")) {
+                    writeStreamToFile(
+                        zis,
+                        resolveRestoreTarget(databasesDir, fileName),
+                        MAX_LEGACY_DATABASE_BYTES,
+                    )
+                } else {
+                    restorePreferencesEntry(zis, fileName)
+                }
                 zipEntry = zis.nextEntry
             }
             zis.close()
             fis.close()
             return true
-        } catch (e: IOException) {
+        } catch (e: Exception) {
             e.printStackTrace()
             return false
         }
@@ -713,7 +731,12 @@ class BackupUnit(
         var zipEntry = zis.nextEntry
         while (zipEntry != null) {
             if (zipEntry.name == SECRETS_FILE) {
-                return JSONObject(String(zis.readBytes()))
+                return JSONObject(
+                    String(
+                        readEntryBytes(zis, MAX_SECRETS_ENVELOPE_BYTES),
+                        Charsets.UTF_8,
+                    )
+                )
             }
             zipEntry = zis.nextEntry
         }
@@ -763,11 +786,119 @@ class BackupUnit(
     private fun remapPrefsFileName(name: String): String =
         if (name.endsWith("_preferences.xml")) "${context.packageName}_preferences.xml" else name
 
-    private fun writeStreamToFile(zis: ZipInputStream, file: File) {
+    private fun restorePreferencesEntry(zis: ZipInputStream, rawFileName: String) {
+        val safeFileName = requireSafeBackupBasename(rawFileName)
+        // Never overwrite the local Tink keyset with a foreign one: that would
+        // make this device's stored secrets undecryptable.
+        if (safeFileName == SecretStore.KEYSET_PREF_XML) return
+
+        val remappedName = remapPrefsFileName(safeFileName)
+        val target = resolveRestoreTarget(sharedPrefsDir, remappedName)
+        if (remappedName == "${context.packageName}_preferences.xml") {
+            val restored = scrubSecretsFromPreferencesXml(
+                readEntryBytes(zis, MAX_PREFERENCES_FILE_BYTES)
+            )
+            if (restored.secrets.isNotEmpty()) {
+                secretPrefs.putAll(restored.secrets)
+            }
+            writeBytesToFile(restored.xml, target)
+        } else {
+            writeStreamToFile(zis, target, MAX_PREFERENCES_FILE_BYTES)
+        }
+    }
+
+    private fun requireSafeBackupBasename(name: String): String {
+        if (
+            name.isEmpty() ||
+            name == "." ||
+            name == ".." ||
+            name.contains('/') ||
+            name.contains('\\') ||
+            File(name).isAbsolute
+        ) {
+            throw IOException("Unsafe backup entry name")
+        }
+        return name
+    }
+
+    private fun resolveRestoreTarget(root: File, fileName: String): File {
+        val canonicalRoot = root.canonicalFile
+        val target = File(canonicalRoot, requireSafeBackupBasename(fileName)).canonicalFile
+        if (target.parentFile != canonicalRoot) {
+            throw IOException("Backup entry escapes its restore directory")
+        }
+        return target
+    }
+
+    private data class ScrubbedPreferences(
+        val xml: ByteArray,
+        val secrets: Map<String, String>,
+    )
+
+    private fun scrubSecretsFromPreferencesXml(xml: ByteArray): ScrubbedPreferences {
+        val text = String(xml, Charsets.UTF_8)
+        if (
+            text.contains("<!DOCTYPE", ignoreCase = true) ||
+            text.contains("<!ENTITY", ignoreCase = true)
+        ) {
+            throw IOException("Unsafe preferences XML")
+        }
+
+        val factory = DocumentBuilderFactory.newInstance().apply {
+            isNamespaceAware = false
+            isExpandEntityReferences = false
+            runCatching { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
+            runCatching { setFeature("http://xml.org/sax/features/external-general-entities", false) }
+            runCatching { setFeature("http://xml.org/sax/features/external-parameter-entities", false) }
+            runCatching { setAttribute("http://javax.xml.XMLConstants/property/accessExternalDTD", "") }
+            runCatching { setAttribute("http://javax.xml.XMLConstants/property/accessExternalSchema", "") }
+        }
+        val document = factory.newDocumentBuilder().parse(ByteArrayInputStream(xml))
+        val root = document.documentElement ?: throw IOException("Missing preferences root")
+        if (root.tagName != "map") throw IOException("Invalid preferences root")
+
+        val secrets = mutableMapOf<String, String>()
+        val secretNames = (SecretKeys.ALL + SecretKeys.DEPRECATED_DEVICE_OAUTH).toSet()
+        val children = root.childNodes
+        for (index in children.length - 1 downTo 0) {
+            val node = children.item(index)
+            val name = node.attributes?.getNamedItem("name")?.nodeValue ?: continue
+            if (name !in secretNames) continue
+            if (name in SecretKeys.ALL && node.nodeName == "string") {
+                node.textContent.takeIf { it.isNotEmpty() }?.let { secrets[name] = it }
+            }
+            root.removeChild(node)
+        }
+
+        val output = ByteArrayOutputStream()
+        TransformerFactory.newInstance().newTransformer().apply {
+            setOutputProperty(OutputKeys.ENCODING, "UTF-8")
+            setOutputProperty(OutputKeys.INDENT, "no")
+        }.transform(DOMSource(document), StreamResult(output))
+        return ScrubbedPreferences(output.toByteArray(), secrets)
+    }
+
+    private fun readEntryBytes(zis: ZipInputStream, maxBytes: Int): ByteArray {
+        val output = ByteArrayOutputStream(minOf(BACKUP_COPY_BUFFER_SIZE, maxBytes))
+        val buffer = ByteArray(BACKUP_COPY_BUFFER_SIZE)
+        var total = 0
+        while (true) {
+            val count = zis.read(buffer)
+            if (count < 0) break
+            total += count
+            if (total > maxBytes) throw IOException("Backup entry exceeds size limit")
+            output.write(buffer, 0, count)
+        }
+        return output.toByteArray()
+    }
+
+    private fun writeBytesToFile(bytes: ByteArray, file: File) {
         file.parentFile?.mkdirs()
-        val fos = FileOutputStream(file)
-        zis.copyTo(fos)
-        fos.close()
+        FileOutputStream(file).use { it.write(bytes) }
+    }
+
+    private fun writeStreamToFile(zis: ZipInputStream, file: File, maxBytes: Int) {
+        writeBytesToFile(readEntryBytes(zis, maxBytes), file)
     }
 
     fun importBookmarks(uri: Uri) {
@@ -938,6 +1069,14 @@ class BackupUnit(
         private const val HISTORY_FILE = "history.json"
         private const val DATABASE_DATA_FILE = "database_data.json"
         private const val SECRETS_FILE = "secrets.enc"
+        private const val MAX_SECRETS_ENVELOPE_BYTES = 256 * 1024
+        private const val MAX_MANIFEST_BYTES = 64 * 1024
+        private const val MAX_GPT_SETTINGS_BYTES = 4 * 1024 * 1024
+        private const val MAX_COLLECTION_ENTRY_BYTES = 64 * 1024 * 1024
+        private const val MAX_DATABASE_DATA_BYTES = 128 * 1024 * 1024
+        private const val MAX_PREFERENCES_FILE_BYTES = 16 * 1024 * 1024
+        private const val MAX_LEGACY_DATABASE_BYTES = 256 * 1024 * 1024
+        private const val BACKUP_COPY_BUFFER_SIZE = 8 * 1024
 
         // API keys deliberately absent: secrets are exported only inside the
         // passphrase-encrypted SECRETS category (secrets.enc), never in this
@@ -991,5 +1130,3 @@ private fun JSONObject.toBookmark(): Bookmark =
         optInt("parent"),
         optInt("order")
     ).apply { id = optInt("id") }
-
-

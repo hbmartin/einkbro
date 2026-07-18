@@ -2,7 +2,6 @@ package info.plateaukao.einkbro.preference
 
 import android.content.Context
 import android.content.SharedPreferences
-import androidx.core.content.edit
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -10,11 +9,12 @@ import com.google.crypto.tink.Aead
 import com.google.crypto.tink.KeyTemplates
 import com.google.crypto.tink.aead.AeadConfig
 import com.google.crypto.tink.integration.android.AndroidKeysetManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import okio.ByteString.Companion.decodeBase64
 import okio.ByteString.Companion.toByteString
-import timber.log.Timber
 
 /**
  * Preference keys whose values are secrets (API keys, passwords, OAuth material).
@@ -52,11 +52,42 @@ interface SecretPrefs {
     /** Current non-empty values for [keys]. */
     fun snapshot(keys: Collection<String>): Map<String, String>
 
-    /** Blocks until the store is loaded and any plaintext migration has run. */
-    fun ensureReady()
+    /** Suspends until the store is loaded and any plaintext migration has run. */
+    suspend fun ensureReady()
 }
 
 private val Context.secretsDataStore by preferencesDataStore(name = "secrets")
+
+class SecretStorageException(
+    message: String,
+    cause: Throwable? = null,
+) : IllegalStateException(message, cause)
+
+internal interface SecretPersistence {
+    fun read(): Map<String, String>
+    fun update(values: Map<String, String?>)
+}
+
+private class DataStoreSecretPersistence(
+    private val context: Context,
+) : SecretPersistence {
+    override fun read(): Map<String, String> = runBlocking {
+        context.secretsDataStore.data.first().asMap().mapNotNull { (key, value) ->
+            (value as? String)?.let { key.name to it }
+        }.toMap()
+    }
+
+    override fun update(values: Map<String, String?>) {
+        runBlocking {
+            context.secretsDataStore.edit { prefs ->
+                values.forEach { (key, value) ->
+                    val prefKey = stringPreferencesKey(key)
+                    if (value == null) prefs.remove(prefKey) else prefs[prefKey] = value
+                }
+            }
+        }
+    }
+}
 
 /**
  * Stores secrets encrypted at rest: each value is AES-GCM-encrypted with a Tink
@@ -68,130 +99,137 @@ private val Context.secretsDataStore by preferencesDataStore(name = "secrets")
  * thread from Application.onCreate); writes are rare (settings edits, sign-ins,
  * restore) and persist synchronously.
  *
- * Devices with a broken Keystore must not crash or lose data: when the Aead is
- * unavailable, values fall back to a plaintext encoding inside the DataStore
- * file — the same exposure as the old plaintext SharedPreferences, still outside
- * any backup. Each stored value is prefixed with its encoding so a later repaired
- * Keystore re-encrypts transparently on the next write.
+ * A write fails explicitly when the Keystore-backed Aead is unavailable. Existing
+ * legacy `p:` values are accepted only long enough to re-encrypt them during load;
+ * the store is not reported ready unless that rewrite succeeds.
  */
-class SecretStore(
-    private val context: Context,
+class SecretStore internal constructor(
     private val plainPrefs: SharedPreferences,
+    private val persistence: SecretPersistence,
+    private val aeadFactory: () -> Aead,
 ) : SecretPrefs {
 
-    @Volatile
-    private var cache: MutableMap<String, String>? = null
+    constructor(context: Context, plainPrefs: SharedPreferences) : this(
+        plainPrefs = plainPrefs,
+        persistence = DataStoreSecretPersistence(context),
+        aeadFactory = { createAead(context) },
+    )
+
+    private var cache: Map<String, String>? = null
     private val lock = Any()
 
-    private val aead: Aead? by lazy {
+    private val aead: Aead by lazy {
         try {
-            AeadConfig.register()
-            AndroidKeysetManager.Builder()
-                .withSharedPref(context, KEYSET_NAME, KEYSET_PREF_FILE)
-                .withKeyTemplate(KeyTemplates.get("AES256_GCM"))
-                .withMasterKeyUri(MASTER_KEY_URI)
-                .build()
-                .keysetHandle
-                .getPrimitive(Aead::class.java)
-        } catch (t: Throwable) {
-            Timber.e(t, "Keystore/Tink unavailable; storing secrets without encryption")
-            null
+            aeadFactory()
+        } catch (e: Exception) {
+            throw SecretStorageException("Encrypted secret storage is unavailable", e)
         }
     }
 
     /** Loads the cache and migrates any plaintext secrets out of the default
      *  SharedPreferences. Called from a background coroutine at app start so the
      *  first on-demand access rarely pays the Keystore/DataStore cost. */
-    fun prime() {
-        runCatching { ensureLoaded() }
+    suspend fun prime() {
+        ensureReady()
     }
 
-    override fun ensureReady() {
-        ensureLoaded()
+    override suspend fun ensureReady() {
+        withContext(Dispatchers.IO) { ensureLoaded() }
     }
 
     override fun getString(key: String, defaultValue: String): String =
-        ensureLoaded()[key] ?: defaultValue
+        synchronized(lock) {
+            ensureLoadedLocked()[key] ?: defaultValue
+        }
 
     override fun putString(key: String, value: String) = putAll(mapOf(key to value))
 
     override fun putAll(values: Map<String, String>) {
         if (values.isEmpty()) return
         synchronized(lock) {
-            val loaded = ensureLoaded()
-            values.forEach { (key, value) ->
-                if (value.isEmpty()) loaded.remove(key) else loaded[key] = value
+            val loaded = ensureLoadedLocked()
+            val encoded = values.mapValues { (key, value) ->
+                value.takeIf { it.isNotEmpty() }?.let { encode(key, it) }
             }
-            runBlocking {
-                context.secretsDataStore.edit { prefs ->
-                    values.forEach { (key, value) ->
-                        if (value.isEmpty()) prefs.remove(stringPreferencesKey(key))
-                        else prefs[stringPreferencesKey(key)] = encode(key, value)
-                    }
+            try {
+                persistence.update(encoded)
+            } catch (e: Exception) {
+                if (e is SecretStorageException) throw e
+                throw SecretStorageException("Failed to persist encrypted secrets", e)
+            }
+            cache = loaded.toMutableMap().apply {
+                values.forEach { (key, value) ->
+                    if (value.isEmpty()) remove(key) else this[key] = value
                 }
-            }
+            }.toMap()
         }
     }
 
-    override fun snapshot(keys: Collection<String>): Map<String, String> {
-        val loaded = ensureLoaded()
-        return keys.mapNotNull { key -> loaded[key]?.let { key to it } }.toMap()
-    }
-
-    private fun ensureLoaded(): MutableMap<String, String> {
-        cache?.let { return it }
+    override fun snapshot(keys: Collection<String>): Map<String, String> =
         synchronized(lock) {
-            cache?.let { return it }
+            val loaded = ensureLoadedLocked()
+            keys.mapNotNull { key -> loaded[key]?.let { key to it } }.toMap()
+        }
+
+    private fun ensureLoaded(): Map<String, String> =
+        synchronized(lock) { ensureLoadedLocked() }
+
+    private fun ensureLoadedLocked(): Map<String, String> {
+        cache?.let { return it }
+        try {
             val loaded = mutableMapOf<String, String>()
-            runCatching {
-                runBlocking { context.secretsDataStore.data.first() }.asMap()
-                    .forEach { (prefKey, stored) ->
-                        if (stored is String) {
-                            decode(prefKey.name, stored)
-                                .takeIf { it.isNotEmpty() }
-                                ?.let { loaded[prefKey.name] = it }
-                        }
+            val plaintextValues = mutableMapOf<String, String>()
+            persistence.read().forEach { (key, stored) ->
+                decode(key, stored)
+                    .takeIf { it.isNotEmpty() }
+                    ?.let { value ->
+                        loaded[key] = value
+                        if (stored.startsWith(PLAIN_PREFIX)) plaintextValues[key] = value
                     }
-            }.onFailure { Timber.e(it, "Failed to load secret store") }
-            cache = loaded
+            }
+            cache = loaded.toMap()
+            if (plaintextValues.isNotEmpty()) {
+                putAll(plaintextValues)
+            }
             // Sweep on every first load: this also captures plaintext values that
             // reappear in the default prefs when an old backup zip is restored
             // (raw file copy + app restart).
-            runCatching { SecretMigration.sweep(plainPrefs, this) }
-                .onFailure { Timber.e(it, "Secret migration failed") }
-            return loaded
+            SecretMigration.sweep(plainPrefs, this)
+            return checkNotNull(cache)
+        } catch (e: Exception) {
+            cache = null
+            if (e is SecretStorageException) throw e
+            throw SecretStorageException("Failed to load encrypted secrets", e)
         }
     }
 
-    // Self-describing value encoding: "enc1:" + base64(AEAD ciphertext bound to
-    // the pref key) when encryption works, "p:" + plaintext when it doesn't.
+    // Self-describing value encoding. The legacy "p:" form is read only for
+    // immediate migration; all new persistence must use "enc1:".
     private fun encode(key: String, value: String): String {
-        val currentAead = aead ?: return PLAIN_PREFIX + value
-        return runCatching {
-            ENC_PREFIX + currentAead.encrypt(value.toByteArray(Charsets.UTF_8), key.toByteArray(Charsets.UTF_8))
+        return try {
+            ENC_PREFIX + aead.encrypt(value.toByteArray(Charsets.UTF_8), key.toByteArray(Charsets.UTF_8))
                 .toByteString().base64()
-        }.getOrElse {
-            Timber.e(it, "Encrypt failed; storing secret without encryption")
-            PLAIN_PREFIX + value
+        } catch (e: Exception) {
+            if (e is SecretStorageException) throw e
+            throw SecretStorageException("Failed to encrypt secret", e)
         }
     }
 
-    private fun decode(key: String, stored: String): String = when {
-        stored.startsWith(ENC_PREFIX) -> runCatching {
-            val cipherBytes = stored.removePrefix(ENC_PREFIX).decodeBase64()?.toByteArray()
-                ?: return ""
-            aead?.decrypt(cipherBytes, key.toByteArray(Charsets.UTF_8))
-                ?.toString(Charsets.UTF_8)
-                .orEmpty()
-        }.getOrElse {
-            // Foreign or lost keyset (e.g. the DataStore file was copied from
-            // another device): treat as unset rather than crashing.
-            Timber.e(it, "Decrypt failed for secret $key")
-            ""
-        }
+    private fun decode(key: String, stored: String): String = try {
+        when {
+            stored.startsWith(ENC_PREFIX) -> {
+                val cipherBytes = stored.removePrefix(ENC_PREFIX).decodeBase64()?.toByteArray()
+                    ?: throw SecretStorageException("Invalid encrypted secret encoding")
+                aead.decrypt(cipherBytes, key.toByteArray(Charsets.UTF_8))
+                    .toString(Charsets.UTF_8)
+            }
 
-        stored.startsWith(PLAIN_PREFIX) -> stored.removePrefix(PLAIN_PREFIX)
-        else -> ""
+            stored.startsWith(PLAIN_PREFIX) -> stored.removePrefix(PLAIN_PREFIX)
+            else -> throw SecretStorageException("Unknown secret encoding")
+        }
+    } catch (e: Exception) {
+        if (e is SecretStorageException) throw e
+        throw SecretStorageException("Failed to decrypt secret", e)
     }
 
     companion object {
@@ -206,6 +244,17 @@ class SecretStore(
 
         private const val ENC_PREFIX = "enc1:"
         private const val PLAIN_PREFIX = "p:"
+
+        private fun createAead(context: Context): Aead {
+            AeadConfig.register()
+            return AndroidKeysetManager.Builder()
+                .withSharedPref(context, KEYSET_NAME, KEYSET_PREF_FILE)
+                .withKeyTemplate(KeyTemplates.get("AES256_GCM"))
+                .withMasterKeyUri(MASTER_KEY_URI)
+                .build()
+                .keysetHandle
+                .getPrimitive(Aead::class.java)
+        }
     }
 }
 
@@ -239,10 +288,12 @@ object SecretMigration {
         if (plaintextKeysToDelete.isEmpty() && deprecatedEncrypted.isEmpty()) {
             return false
         }
-        // commit (not apply) so the on-disk XML loses the plaintext before any
-        // "export all preferences" could copy the file verbatim.
-        sp.edit(commit = true) {
-            plaintextKeysToDelete.forEach(::remove)
+        // Commit (not apply) and verify the result so callers never treat the
+        // store as ready while the on-disk XML still contains plaintext.
+        val editor = sp.edit()
+        plaintextKeysToDelete.forEach(editor::remove)
+        if (!editor.commit()) {
+            throw SecretStorageException("Failed to delete plaintext secrets")
         }
         return true
     }

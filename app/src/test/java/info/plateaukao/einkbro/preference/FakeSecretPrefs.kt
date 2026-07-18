@@ -19,5 +19,5 @@ class FakeSecretPrefs(
     override fun snapshot(keys: Collection<String>): Map<String, String> =
         values.filterKeys(keys::contains)
 
-    override fun ensureReady() = Unit
+    override suspend fun ensureReady() = Unit
 }
