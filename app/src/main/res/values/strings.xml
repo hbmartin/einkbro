@@ -364,6 +364,8 @@
     <string name="go_to">Click</string>
     <string name="setting_title_background_loading">Load non-active tabs</string>
     <string name="setting_summary_background_loading">If tab is not activated, still load its content in background</string>
+    <string name="setting_title_max_live_tabs">Max active tabs</string>
+    <string name="setting_summary_max_live_tabs">Free memory of least recently used tabs beyond this count; they reload when revisited. 0 keeps all tabs in memory</string>
     <string name="setting_title_search">Search</string>
     <string name="dialog_toc_title">Table of Contents</string>
     <string name="toc_delete">Delete</string>

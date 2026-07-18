@@ -6,6 +6,7 @@ import info.plateaukao.einkbro.setting.BooleanSettingItem
 import info.plateaukao.einkbro.setting.DividerSettingItem
 import info.plateaukao.einkbro.setting.ListSettingWithEnumItem
 import info.plateaukao.einkbro.setting.SettingItemInterface
+import info.plateaukao.einkbro.setting.ValueSettingItem
 
 fun buildBehaviorSettingItems(deps: SettingScreenDeps): List<SettingItemInterface> {
     val config = deps.config
@@ -22,6 +23,13 @@ fun buildBehaviorSettingItems(deps: SettingScreenDeps): List<SettingItemInterfac
             0,
             R.string.setting_summary_background_loading,
             config.tab::enableWebBkgndLoad,
+        ),
+        ValueSettingItem(
+            R.string.setting_title_max_live_tabs,
+            0,
+            R.string.setting_summary_max_live_tabs,
+            config.tab::maxLiveTabs,
+            showValue = true,
         ),
         BooleanSettingItem(
             R.string.setting_title_next_tab,

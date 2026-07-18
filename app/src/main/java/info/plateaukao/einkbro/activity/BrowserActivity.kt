@@ -978,6 +978,9 @@ open class BrowserActivity : FragmentActivity(), BrowserController {
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         if (level >= TRIM_MEMORY_MODERATE) {
+            tabManager.hibernateAllEligibleBackgroundTabs()
+            // Ineligible tabs (media, translate/AI, incognito) stay live; at
+            // least stop their rendering work
             for (controller in browserContainer.list()) {
                 if (controller != currentAlbumController) controller.pauseWebView()
             }

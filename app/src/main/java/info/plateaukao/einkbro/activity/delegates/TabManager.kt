@@ -8,15 +8,18 @@ import android.widget.FrameLayout
 import androidx.fragment.app.FragmentActivity
 import info.plateaukao.einkbro.R
 import info.plateaukao.einkbro.activity.BrowserState
+import android.os.Bundle
 import info.plateaukao.einkbro.browser.AlbumCallback
 import info.plateaukao.einkbro.browser.AlbumController
 import info.plateaukao.einkbro.browser.BrowserContainer
+import info.plateaukao.einkbro.browser.HibernationPolicy
 import info.plateaukao.einkbro.browser.PlaceholderAlbumController
 import info.plateaukao.einkbro.database.BookmarkManager
 import info.plateaukao.einkbro.preference.AlbumInfo
 import info.plateaukao.einkbro.preference.ConfigManager
 import info.plateaukao.einkbro.unit.BrowserUnit
 import info.plateaukao.einkbro.unit.ViewUnit
+import info.plateaukao.einkbro.view.Album
 import info.plateaukao.einkbro.view.EBWebView
 import info.plateaukao.einkbro.view.dialog.DialogManager
 import info.plateaukao.einkbro.viewmodel.AlbumViewModel
@@ -47,6 +50,15 @@ class TabManager(
 
     private val uiHandler = Handler(Looper.getMainLooper())
     private val saveAlbumInfoRunnable = Runnable { updateSavedAlbumInfo() }
+
+    // LRU order for hibernation, keyed by Album.id (stable across
+    // placeholder <-> WebView swaps). Monotonic counter, not wall clock.
+    private var accessCounter = 0L
+    private val lastAccess = HashMap<Int, Long>()
+
+    private fun touchLru(album: Album) {
+        lastAccess[album.id] = ++accessCounter
+    }
 
     fun destroyPreloadedWebView() {
         preloadedWebView?.destroy()
@@ -123,6 +135,9 @@ class TabManager(
         if (config.browser.adBlock) {
             adFilterProvider().setupWebView(newWebView)
         }
+
+        touchLru(newWebView.album)
+        enforceLiveTabLimit()
     }
 
     // A lazily-restored tab defers even WebView construction: it occupies a
@@ -137,6 +152,7 @@ class TabManager(
         updateTabPreview(placeholder, url)
         updateWebViewCount()
         updateSavedAlbumInfo()
+        touchLru(placeholder.album)
     }
 
     // Build the real EBWebView for a placeholder tab and take over its slot.
@@ -167,6 +183,63 @@ class TabManager(
             adFilterProvider().setupWebView(webView)
         }
         return webView
+    }
+
+    private fun isHibernationEligible(webView: EBWebView): Boolean {
+        if (webView === state.currentAlbumController) return false
+        // Translate/AI/data: tabs cannot be rebuilt from a URL (isAIPage also
+        // covers tabs with a live chat/agent session)
+        if (webView.isTranslatePage || webView.isAIPage) return false
+        if (webView.incognito) return false
+        // Don't kill background playback the user opted into
+        if (webView.hasVideo && config.browser.continueMedia) return false
+        val url = webView.albumUrl.ifBlank { webView.initAlbumUrl }
+        return url.isNotBlank() && url != BrowserUnit.URL_ABOUT_BLANK && !url.startsWith("data")
+    }
+
+    // Replace a background tab's WebView with a placeholder that can rebuild
+    // it on next activation, freeing the native WebView.
+    fun hibernateAlbum(controller: AlbumController) {
+        val webView = controller as? EBWebView ?: return
+        if (!isHibernationEligible(webView)) return
+
+        // The error page is a synthetic loadDataWithBaseURL entry; skip its
+        // history so activation retries the failed URL fresh
+        val savedState = if (webView.errorPageUrl == null) {
+            Bundle().takeIf { bundle -> (webView.saveState(bundle)?.size ?: 0) > 0 }
+        } else null
+
+        val placeholder = PlaceholderAlbumController(
+            title = webView.albumTitle,
+            url = webView.albumUrl.ifBlank { webView.initAlbumUrl },
+            incognito = webView.incognito,
+            savedState = savedState,
+            albumCallback = activity as? AlbumCallback,
+            existingAlbum = webView.album,
+        )
+        browserContainer.replace(webView, placeholder)
+        browserContainer.destroyWebView(webView)
+    }
+
+    fun hibernateAllEligibleBackgroundTabs() {
+        browserContainer.list().toList().forEach { hibernateAlbum(it) }
+    }
+
+    private fun enforceLiveTabLimit() {
+        val maxLiveTabs = config.tab.maxLiveTabs
+        if (maxLiveTabs <= 0) return
+        val states = browserContainer.list().map { controller ->
+            HibernationPolicy.TabState(
+                albumId = controller.album.id,
+                isLive = controller is EBWebView,
+                isEligible = (controller as? EBWebView)?.let { isHibernationEligible(it) } == true,
+                lastAccess = lastAccess[controller.album.id] ?: 0L,
+            )
+        }
+        val victims = HibernationPolicy.selectTabsToHibernate(states, maxLiveTabs)
+        if (victims.isEmpty()) return
+        browserContainer.list().filter { it.album.id in victims }.toList()
+            .forEach { hibernateAlbum(it) }
     }
 
     private fun maybeCreateNewPreloadWebView(
@@ -291,6 +364,9 @@ class TabManager(
             albumViewModel.focusIndex.intValue = index
         }
         updateLanguageLabel()
+
+        touchLru(controller.album)
+        enforceLiveTabLimit()
     }
 
     fun removeAlbum(albumController: AlbumController, showHome: Boolean) {
@@ -300,6 +376,7 @@ class TabManager(
             }
 
             albumViewModel.removeAlbum(albumController.album)
+            lastAccess.remove(albumController.album.id)
             val removeIndex = browserContainer.indexOf(albumController)
             val currentIndex = browserContainer.indexOf(state.currentAlbumController)
             browserContainer.remove(albumController)
@@ -343,6 +420,7 @@ class TabManager(
             }
             albumViewModel.clearAlbums()
             browserContainer.clear()
+            lastAccess.clear()
             state.currentAlbumController = null
             updateSavedAlbumInfo()
             updateWebViewCount()

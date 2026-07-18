@@ -102,6 +102,14 @@ class TabConfigTest {
     }
 
     @Test
+    fun `maxLiveTabs defaults to unlimited and round trips`() {
+        assertEquals(0, config.maxLiveTabs)
+        config.maxLiveTabs = 5
+        assertEquals(5, config.maxLiveTabs)
+        assertEquals(5, sp.store[TabConfig.K_MAX_LIVE_TABS])
+    }
+
+    @Test
     fun `purgeHistoryTimestamp round trips`() {
         assertEquals(0L, config.purgeHistoryTimestamp)
         config.purgeHistoryTimestamp = 1234567890L
