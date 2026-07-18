@@ -430,8 +430,16 @@
     <string name="backup_category_bookmarks">Bookmarks</string>
     <string name="backup_category_history">History</string>
     <string name="backup_category_database_data">Database (Highlights, GPT Queries, Site Settings, etc.)</string>
+    <string name="backup_category_secrets">API keys and passwords</string>
     <string name="dialog_title_backup_categories">Select data to backup</string>
     <string name="dialog_title_restore_categories">Select data to restore</string>
+    <string name="dialog_title_backup_passphrase">Set backup passphrase</string>
+    <string name="dialog_title_restore_passphrase">Enter backup passphrase</string>
+    <string name="backup_passphrase_hint">Passphrase</string>
+    <string name="backup_passphrase_confirm_hint">Confirm passphrase</string>
+    <string name="backup_passphrase_description">API keys and passwords are included in the backup only in encrypted form. Cancel to back up without them.</string>
+    <string name="toast_passphrase_mismatch">Passphrases do not match</string>
+    <string name="toast_wrong_passphrase">Wrong passphrase</string>
     <string name="setting_title_share_appData">Share app data</string>
     <string name="setting_summary_share_appData">Share app data to another device over local network</string>
     <string name="setting_title_receive_appData">Receive app data</string>

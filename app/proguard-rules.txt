@@ -31,3 +31,8 @@
 -dontwarn com.gemalto.jp2.**
 # pdfbox-android: BouncyCastle excluded (only needed for encrypted PDFs)
 -dontwarn org.bouncycastle.**
+
+# Tink (secrets encryption): compile-only annotation references that R8 warns
+# about; the library ships its own consumer rules for everything else.
+-dontwarn com.google.errorprone.annotations.**
+-dontwarn javax.annotation.**

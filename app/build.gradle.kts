@@ -171,6 +171,12 @@ dependencies {
     implementation(libs.timber)
     ksp(libs.androidx.room.compiler)
 
+    // Encrypted-at-rest storage for API keys and passwords: values are encrypted
+    // with a Keystore-backed Tink Aead and persisted in a Preferences DataStore
+    // (files/datastore/), outside the plaintext shared_prefs/ that backups copy.
+    implementation(libs.androidx.datastore.preferences)
+    implementation(libs.tink.android)
+
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.compose.ui)

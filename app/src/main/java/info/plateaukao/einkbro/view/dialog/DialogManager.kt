@@ -60,6 +60,8 @@ import info.plateaukao.einkbro.view.EBToast
 import info.plateaukao.einkbro.view.compose.MyTheme
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 
 
 class DialogManager(
@@ -515,6 +517,121 @@ class DialogManager(
             messageResId = R.string.toast_restart,
             okAction = { restartApp(activity) }
         )
+    }
+
+    /**
+     * Asks for the backup-secrets passphrase. With [requireConfirmation] (export)
+     * a second field must match before the dialog accepts; without it (restore) a
+     * single field is shown, optionally preloaded with an error such as
+     * "wrong passphrase" for retry loops. Returns null when the user cancels.
+     */
+    suspend fun getBackupPassphrase(
+        requireConfirmation: Boolean,
+        initialErrorResId: Int = 0,
+    ): String? = suspendCoroutine { continuation ->
+        var resumed = false
+        fun resumeOnce(value: String?) {
+            if (!resumed) {
+                resumed = true
+                continuation.resume(value)
+            }
+        }
+
+        val passphraseState = mutableStateOf("")
+        val confirmState = mutableStateOf("")
+        val errorResIdState = mutableStateOf(initialErrorResId)
+
+        val composeView = ComposeView(activity).apply {
+            setViewTreeLifecycleOwner(activity as androidx.lifecycle.LifecycleOwner)
+            setViewTreeSavedStateRegistryOwner(activity as androidx.savedstate.SavedStateRegistryOwner)
+            setContent {
+                MyTheme {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 15.dp)
+                    ) {
+                        if (requireConfirmation) {
+                            Text(
+                                text = stringResource(R.string.backup_passphrase_description),
+                                color = MaterialTheme.colors.onBackground,
+                                fontSize = 14.sp,
+                                modifier = Modifier.padding(bottom = 8.dp),
+                            )
+                        }
+                        OutlinedTextField(
+                            value = passphraseState.value,
+                            onValueChange = { passphraseState.value = it },
+                            label = { Text(stringResource(R.string.backup_passphrase_hint)) },
+                            visualTransformation = PasswordVisualTransformation(),
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = TextFieldDefaults.outlinedTextFieldColors(
+                                textColor = MaterialTheme.colors.onBackground,
+                            ),
+                        )
+                        if (requireConfirmation) {
+                            OutlinedTextField(
+                                value = confirmState.value,
+                                onValueChange = { confirmState.value = it },
+                                label = { Text(stringResource(R.string.backup_passphrase_confirm_hint)) },
+                                visualTransformation = PasswordVisualTransformation(),
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = TextFieldDefaults.outlinedTextFieldColors(
+                                    textColor = MaterialTheme.colors.onBackground,
+                                ),
+                            )
+                        }
+                        if (errorResIdState.value != 0) {
+                            Text(
+                                text = stringResource(errorResIdState.value),
+                                color = MaterialTheme.colors.error,
+                                fontSize = 14.sp,
+                                modifier = Modifier.padding(top = 8.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        val dialog = AlertDialog.Builder(activity, R.style.TouchAreaDialog)
+            .setTitle(
+                if (requireConfirmation) R.string.dialog_title_backup_passphrase
+                else R.string.dialog_title_restore_passphrase
+            )
+            .setView(composeView)
+            .setPositiveButton(android.R.string.ok, null)
+            .setNegativeButton(android.R.string.cancel) { d, _ -> d.dismiss() }
+            .create().apply {
+                window?.setGravity(if (config.ui.isToolbarOnTop) Gravity.CENTER else Gravity.BOTTOM)
+                window?.setBackgroundDrawableResource(R.drawable.background_with_border_margin)
+                window?.decorView?.setViewTreeLifecycleOwner(activity as androidx.lifecycle.LifecycleOwner)
+                window?.decorView?.setViewTreeSavedStateRegistryOwner(activity as androidx.savedstate.SavedStateRegistryOwner)
+            }
+
+        dialog.setOnDismissListener {
+            ViewUnit.hideKeyboard(activity)
+            resumeOnce(null)
+        }
+        dialog.show()
+        // Positive button set after show() so a validation failure keeps the
+        // dialog open instead of auto-dismissing.
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val passphrase = passphraseState.value
+            when {
+                passphrase.isEmpty() ->
+                    errorResIdState.value = R.string.toast_input_empty
+
+                requireConfirmation && passphrase != confirmState.value ->
+                    errorResIdState.value = R.string.toast_passphrase_mismatch
+
+                else -> {
+                    resumeOnce(passphrase)
+                    dialog.dismiss()
+                }
+            }
+        }
+        dialog.allowImeForComposeContent()
     }
 
     fun showInstapaperCredentialsDialog(

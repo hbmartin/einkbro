@@ -26,6 +26,8 @@ import info.plateaukao.einkbro.browser.Javascript
 import info.plateaukao.einkbro.database.BookmarkManager
 import info.plateaukao.einkbro.database.RecordRepository
 import info.plateaukao.einkbro.preference.ConfigManager
+import info.plateaukao.einkbro.preference.SecretPrefs
+import info.plateaukao.einkbro.preference.SecretStore
 import info.plateaukao.einkbro.search.suggestion.SearchSuggestionViewModel
 import info.plateaukao.einkbro.data.remote.GoogleDriveRepository
 import info.plateaukao.einkbro.data.remote.InstapaperRepository
@@ -59,8 +61,12 @@ class EinkBroApplication : Application() {
         PreferenceManager.getDefaultSharedPreferences(applicationContext)
     }
 
+    private val secretStore: SecretStore by lazy {
+        SecretStore(applicationContext, sp)
+    }
+
     private val config: ConfigManager by lazy {
-        ConfigManager(applicationContext, sp)
+        ConfigManager(applicationContext, sp, secretStore)
     }
 
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -71,6 +77,7 @@ class EinkBroApplication : Application() {
         single<CoroutineScope> { appScope }
         single { config }
         single { sp }
+        single<SecretPrefs> { secretStore }
         single { BookmarkManager(androidContext()) }
         single { info.plateaukao.einkbro.userscript.UserScriptManager(androidContext()) }
         single { RecordRepository() }
@@ -100,6 +107,11 @@ class EinkBroApplication : Application() {
             androidContext(this@EinkBroApplication)
             modules(myModule)
         }
+
+        // Load the encrypted secret store and sweep any plaintext secrets out of the
+        // default SharedPreferences off the main thread; on-demand access is safe too
+        // (first reader pays the load under a lock).
+        appScope.launch { secretStore.prime() }
 
         AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM)
 

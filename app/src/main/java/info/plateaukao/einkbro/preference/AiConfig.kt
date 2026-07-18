@@ -7,11 +7,14 @@ import info.plateaukao.einkbro.viewmodel.TRANSLATE_API
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
-class AiConfig(private val sp: SharedPreferences) {
+class AiConfig(
+    private val sp: SharedPreferences,
+    secrets: SecretPrefs,
+) {
 
-    var gptApiKey by StringPreference(sp, K_GPT_API_KEY, "")
+    var gptApiKey by SecretStringPreference(secrets, K_GPT_API_KEY, "")
 
-    var geminiApiKey by StringPreference(sp, K_GEMINI_API_KEY, "")
+    var geminiApiKey by SecretStringPreference(secrets, K_GEMINI_API_KEY, "")
 
     var gptSystemPrompt by StringPreference(
         sp,
@@ -28,7 +31,7 @@ class AiConfig(private val sp: SharedPreferences) {
         K_GPT_USER_PROMPT_WEB_PAGE,
         "Summarize in 50 words:"
     )
-    var imageApiKey by StringPreference(sp, K_IMAGE_API_KEY, "")
+    var imageApiKey by SecretStringPreference(secrets, K_IMAGE_API_KEY, "")
     var imageTranslateIntervalSeconds by IntPreference(sp, "K_IMAGE_TRANSLATE_INTERVAL", 4)
     var gptModel by StringPreference(sp, K_GPT_MODEL, "gpt-4.1")
     var alternativeModel by StringPreference(sp, K_ALTERNATIVE_MODEL, gptModel)

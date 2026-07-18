@@ -115,6 +115,7 @@ class SettingActivity : FragmentActivity(), BackupOps {
     private val backupUnit: BackupUnit by lazy { BackupUnit(this) }
 
     private var pendingBackupCategories: Set<BackupCategory> = emptySet()
+    private var pendingBackupPassphrase: String? = null
 
     private val exportBookmarksLauncher: ActivityResultLauncher<Intent> =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -132,9 +133,13 @@ class SettingActivity : FragmentActivity(), BackupOps {
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             val uri: Uri = result.data?.data ?: return@registerForActivityResult
             val categories = pendingBackupCategories
+            val passphrase = pendingBackupPassphrase
             pendingBackupCategories = emptySet()
+            pendingBackupPassphrase = null
             if (categories.isNotEmpty()) {
-                lifecycleScope.launch { backupUnit.backupData(this@SettingActivity, uri, categories) }
+                lifecycleScope.launch {
+                    backupUnit.backupData(this@SettingActivity, uri, categories, passphrase)
+                }
             }
         }
 
@@ -149,13 +154,63 @@ class SettingActivity : FragmentActivity(), BackupOps {
             } else {
                 dialogManager.showRestoreCategoryDialog(available) { selected ->
                     lifecycleScope.launch {
-                        if (backupUnit.restoreBackupData(this@SettingActivity, uri, selected)) {
+                        val restored = restoreCategories(
+                            selected,
+                            restoreOthers = { backupUnit.restoreBackupData(this@SettingActivity, uri, it) },
+                            readSecretsEnvelope = { backupUnit.readSecretsEnvelope(this@SettingActivity, uri) },
+                        )
+                        if (restored) {
                             dialogManager.showRestartConfirmDialog()
                         }
                     }
                 }
             }
         }
+
+    /**
+     * Restores [selected] categories: the regular ones through [restoreOthers],
+     * then the passphrase-encrypted secrets with a prompt-and-retry loop
+     * (cancel skips the secrets without failing the rest).
+     */
+    private suspend fun restoreCategories(
+        selected: Set<BackupCategory>,
+        restoreOthers: suspend (Set<BackupCategory>) -> Boolean,
+        readSecretsEnvelope: () -> org.json.JSONObject?,
+    ): Boolean {
+        val others = selected - BackupCategory.SECRETS
+        val othersRestored = others.isNotEmpty() && restoreOthers(others)
+        var secretsRestored = false
+        if (BackupCategory.SECRETS in selected) {
+            val envelope = withContext(Dispatchers.IO) { readSecretsEnvelope() }
+            if (envelope != null) {
+                var errorResId = 0
+                while (true) {
+                    val passphrase = dialogManager.getBackupPassphrase(
+                        requireConfirmation = false,
+                        initialErrorResId = errorResId,
+                    ) ?: break
+                    if (backupUnit.restoreSecrets(envelope, passphrase)) {
+                        secretsRestored = true
+                        break
+                    }
+                    errorResId = R.string.toast_wrong_passphrase
+                }
+            }
+        }
+        return othersRestored || secretsRestored
+    }
+
+    /** Asks for an export passphrase when secrets are selected; returns the
+     *  possibly reduced category set (cancel exports without secrets) paired
+     *  with the passphrase. */
+    private suspend fun resolveExportSecrets(
+        categories: Set<BackupCategory>,
+    ): Pair<Set<BackupCategory>, String?> {
+        if (BackupCategory.SECRETS !in categories) return categories to null
+        val passphrase = dialogManager.getBackupPassphrase(requireConfirmation = true)
+        return if (passphrase == null) (categories - BackupCategory.SECRETS) to null
+        else categories to passphrase
+    }
 
 
     @OptIn(ExperimentalComposeUiApi::class)
@@ -292,8 +347,13 @@ class SettingActivity : FragmentActivity(), BackupOps {
 
     override fun exportAppData() {
         dialogManager.showBackupCategoryDialog { categories ->
-            pendingBackupCategories = categories
-            dialogManager.showBackupFilePicker(exportBackupLauncher)
+            lifecycleScope.launch {
+                val (effective, passphrase) = resolveExportSecrets(categories)
+                if (effective.isEmpty()) return@launch
+                pendingBackupCategories = effective
+                pendingBackupPassphrase = passphrase
+                dialogManager.showBackupFilePicker(exportBackupLauncher)
+            }
         }
     }
 
@@ -316,17 +376,19 @@ class SettingActivity : FragmentActivity(), BackupOps {
     }
 
     private fun shareAppData(categories: Set<BackupCategory>) {
-        lifecycleScope.launch(Dispatchers.IO) {
-            val tempFile = backupUnit.backupToTempFile(categories) ?: return@launch
-            withContext(Dispatchers.Main) {
-                ShareUtil.startServingFile(lifecycleScope, tempFile)
-                dialogManager.showOkCancelDialog(
-                    title = getString(R.string.setting_title_share_appData),
-                    message = getString(R.string.share_broadcasting),
-                    okAction = { ShareUtil.stopBroadcast(); tempFile.delete() },
-                    showNegativeButton = false,
-                )
-            }
+        lifecycleScope.launch {
+            val (effective, passphrase) = resolveExportSecrets(categories)
+            if (effective.isEmpty()) return@launch
+            val tempFile = withContext(Dispatchers.IO) {
+                backupUnit.backupToTempFile(effective, secretsPassphrase = passphrase)
+            } ?: return@launch
+            ShareUtil.startServingFile(lifecycleScope, tempFile)
+            dialogManager.showOkCancelDialog(
+                title = getString(R.string.setting_title_share_appData),
+                message = getString(R.string.share_broadcasting),
+                okAction = { ShareUtil.stopBroadcast(); tempFile.delete() },
+                showNegativeButton = false,
+            )
         }
     }
 
@@ -348,7 +410,12 @@ class SettingActivity : FragmentActivity(), BackupOps {
             if (available != null) {
                 dialogManager.showRestoreCategoryDialog(available) { selected ->
                     lifecycleScope.launch {
-                        if (backupUnit.restoreBackupData(file, selected)) {
+                        val restored = restoreCategories(
+                            selected,
+                            restoreOthers = { backupUnit.restoreBackupData(file, it) },
+                            readSecretsEnvelope = { backupUnit.readSecretsEnvelope(file) },
+                        )
+                        if (restored) {
                             dialogManager.showRestartConfirmDialog()
                         }
                         file.delete()
@@ -412,8 +479,9 @@ class SettingActivity : FragmentActivity(), BackupOps {
     }
 
     private fun uploadBackupToDrive(existingId: String?) = launchDriveOp {
+        val (categories, passphrase) = resolveExportSecrets(BackupCategory.entries.toSet())
         val tempFile = withContext(Dispatchers.IO) {
-            backupUnit.backupToTempFile(BackupCategory.entries.toSet(), "drive_upload.zip")
+            backupUnit.backupToTempFile(categories, "drive_upload.zip", passphrase)
         }
         if (tempFile == null) {
             EBToast.show(this@SettingActivity, R.string.toast_error)
@@ -441,7 +509,12 @@ class SettingActivity : FragmentActivity(), BackupOps {
             }
             dialogManager.showRestoreCategoryDialog(available) { selected ->
                 lifecycleScope.launch {
-                    if (backupUnit.restoreBackupData(tempFile, selected)) {
+                    val restored = restoreCategories(
+                        selected,
+                        restoreOthers = { backupUnit.restoreBackupData(tempFile, it) },
+                        readSecretsEnvelope = { backupUnit.readSecretsEnvelope(tempFile) },
+                    )
+                    if (restored) {
                         dialogManager.showRestartConfirmDialog()
                     }
                     tempFile.delete()

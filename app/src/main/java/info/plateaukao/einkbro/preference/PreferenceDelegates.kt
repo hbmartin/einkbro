@@ -47,6 +47,21 @@ class StringPreference(
         sharedPreferences.edit { putString(key, value) }
 }
 
+/** Like [StringPreference], but backed by the encrypted [SecretPrefs] store
+ *  instead of the plaintext default SharedPreferences. */
+class SecretStringPreference(
+    private val secrets: SecretPrefs,
+    private val key: String,
+    private val defaultValue: String = "",
+) : ReadWriteProperty<Any, String> {
+
+    override fun getValue(thisRef: Any, property: KProperty<*>): String =
+        secrets.getString(key, defaultValue)
+
+    override fun setValue(thisRef: Any, property: KProperty<*>, value: String) =
+        secrets.putString(key, value)
+}
+
 class BrowserActionPreference(
     private val sharedPreferences: SharedPreferences,
     private val key: String,

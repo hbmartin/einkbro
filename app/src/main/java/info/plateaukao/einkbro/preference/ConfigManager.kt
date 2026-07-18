@@ -16,10 +16,11 @@ import org.koin.core.component.inject
 class ConfigManager(
     private val context: Context,
     private val sp: SharedPreferences,
+    private val secrets: SecretPrefs,
 ) : KoinComponent {
     private val bookmarkManager: BookmarkManager by inject()
 
-    val ai = AiConfig(sp)
+    val ai = AiConfig(sp, secrets)
     val tts = TtsConfig(sp)
     val translation = TranslationConfig(sp)
     val touch = TouchConfig(sp)
@@ -233,15 +234,15 @@ class ConfigManager(
     var clearHistory by BooleanPreference(sp, K_CLEAR_HISTORY, false)
     var clearWhenQuit by BooleanPreference(sp, K_CLEAR_WHEN_QUIT, false)
 
-    var instapaperUsername by StringPreference(sp, K_INSTAPAPER_USERNAME, "")
-    var instapaperPassword by StringPreference(sp, K_INSTAPAPER_PASSWORD, "")
+    var instapaperUsername by SecretStringPreference(secrets, K_INSTAPAPER_USERNAME, "")
+    var instapaperPassword by SecretStringPreference(secrets, K_INSTAPAPER_PASSWORD, "")
 
     // Serialized DriveAuthState (Google Drive backup sync); empty when signed out.
-    var driveAuthStateJson by StringPreference(sp, K_DRIVE_AUTH_STATE, "")
+    var driveAuthStateJson by SecretStringPreference(secrets, K_DRIVE_AUTH_STATE, "")
 
     // In-flight sign-in (PKCE verifier + state) between opening the consent URL
     // in the browser and the custom-scheme redirect coming back.
-    var drivePendingAuthJson by StringPreference(sp, K_DRIVE_PENDING_AUTH, "")
+    var drivePendingAuthJson by SecretStringPreference(secrets, K_DRIVE_PENDING_AUTH, "")
 
     companion object {
         const val K_SCROLL_FIX_LIST = "sp_scroll_fix_list"

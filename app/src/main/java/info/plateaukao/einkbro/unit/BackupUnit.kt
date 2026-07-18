@@ -25,6 +25,9 @@ import info.plateaukao.einkbro.database.Record
 import info.plateaukao.einkbro.database.RecordRepository
 import info.plateaukao.einkbro.database.SavedPage
 import info.plateaukao.einkbro.database.WhitelistDomain
+import info.plateaukao.einkbro.preference.SecretKeys
+import info.plateaukao.einkbro.preference.SecretPrefs
+import info.plateaukao.einkbro.preference.SecretStore
 import info.plateaukao.einkbro.view.EBToast
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -51,6 +54,11 @@ enum class BackupCategory(val displayNameResId: Int) {
     BOOKMARKS(R.string.backup_category_bookmarks),
     HISTORY(R.string.backup_category_history),
     DATABASE_DATA(R.string.backup_category_database_data),
+
+    // API keys and passwords. Only ever written as the passphrase-encrypted
+    // secrets.enc entry; silently ignored by older app versions restoring a
+    // newer zip (unknown category names and entries are skipped).
+    SECRETS(R.string.backup_category_secrets),
 }
 
 
@@ -60,6 +68,7 @@ class BackupUnit(
     private val bookmarkManager: BookmarkManager by inject()
     private val recordDb: RecordRepository by inject()
     private val sp: SharedPreferences by inject()
+    private val secretPrefs: SecretPrefs by inject()
     private val coroutineScope: CoroutineScope by inject()
 
     // Per-app data directories derived from the running app's own context, so backup
@@ -69,10 +78,15 @@ class BackupUnit(
     private val sharedPrefsDir: File get() = File(context.dataDir, "shared_prefs")
     private val databasesDir: File get() = File(context.dataDir, "databases")
 
-    suspend fun backupData(context: Context, uri: Uri, categories: Set<BackupCategory>): Boolean {
+    suspend fun backupData(
+        context: Context,
+        uri: Uri,
+        categories: Set<BackupCategory>,
+        secretsPassphrase: String? = null,
+    ): Boolean {
         try {
             val fos = context.contentResolver.openOutputStream(uri) ?: return false
-            writeBackupZip(fos, categories)
+            writeBackupZip(fos, categories, secretsPassphrase)
             EBToast.show(context, R.string.toast_backup_successful)
             return true
         } catch (e: IOException) {
@@ -84,10 +98,11 @@ class BackupUnit(
     suspend fun backupToTempFile(
         categories: Set<BackupCategory>,
         fileName: String = "backup_share.zip",
+        secretsPassphrase: String? = null,
     ): File? {
         return try {
             val tempFile = File(context.cacheDir, fileName)
-            writeBackupZip(FileOutputStream(tempFile), categories)
+            writeBackupZip(FileOutputStream(tempFile), categories, secretsPassphrase)
             tempFile
         } catch (e: IOException) {
             e.printStackTrace()
@@ -98,36 +113,61 @@ class BackupUnit(
     private suspend fun writeBackupZip(
         outputStream: java.io.OutputStream,
         categories: Set<BackupCategory>,
+        secretsPassphrase: String? = null,
     ) {
+        // Secrets are only exported passphrase-encrypted; without a passphrase the
+        // category is dropped (also from the manifest, so a restore never offers a
+        // category the zip doesn't contain).
+        val effectiveCategories =
+            if (secretsPassphrase == null) categories - BackupCategory.SECRETS else categories
+
         val zos = ZipOutputStream(outputStream)
 
         // Write manifest
         val manifest = JSONObject().apply {
             put("version", 2)
-            put("categories", JSONArray(categories.map { it.name }))
+            put("categories", JSONArray(effectiveCategories.map { it.name }))
         }
         zos.putNextEntry(ZipEntry(MANIFEST_FILE))
         zos.write(manifest.toString().toByteArray())
         zos.closeEntry()
 
-        if (BackupCategory.ALL_PREFERENCES in categories) {
+        if (BackupCategory.ALL_PREFERENCES in effectiveCategories) {
+            // Make sure the plaintext→encrypted migration has swept the default
+            // prefs XML before it is copied verbatim (the sweep normally runs at
+            // app start, but don't race it).
+            secretPrefs.ensureReady()
             val sharedPrefsDirectory = sharedPrefsDir
             val sharedPrefsFiles = sharedPrefsDirectory.listFiles()
             if (sharedPrefsFiles != null) {
                 for (sharedPrefsFile in sharedPrefsFiles) {
+                    // The Tink keyset never leaves the device: it is useless without
+                    // this device's Keystore master key, and restoring a foreign
+                    // keyset would clobber the local one.
+                    if (sharedPrefsFile.name == SecretStore.KEYSET_PREF_XML) continue
                     writeFileToZip(zos, sharedPrefsFile, "shared_prefs/${sharedPrefsFile.name}")
                 }
             }
         }
 
-        if (BackupCategory.GPT_SETTINGS in categories) {
+        if (BackupCategory.SECRETS in effectiveCategories && secretsPassphrase != null) {
+            val payload = secretPrefs.snapshot(SecretKeys.BACKUP)
+            val envelope = withContext(Dispatchers.Default) {
+                PassphraseCipher().encrypt(payload, secretsPassphrase.toCharArray())
+            }
+            zos.putNextEntry(ZipEntry(SECRETS_FILE))
+            zos.write(envelope.toString().toByteArray())
+            zos.closeEntry()
+        }
+
+        if (BackupCategory.GPT_SETTINGS in effectiveCategories) {
             val gptJson = exportGptSettings()
             zos.putNextEntry(ZipEntry(GPT_SETTINGS_FILE))
             zos.write(gptJson.toString().toByteArray())
             zos.closeEntry()
         }
 
-        if (BackupCategory.BOOKMARKS in categories) {
+        if (BackupCategory.BOOKMARKS in effectiveCategories) {
             val bookmarks = kotlinx.coroutines.runBlocking {
                 bookmarkManager.getAllBookmarks()
             }
@@ -136,7 +176,7 @@ class BackupUnit(
             zos.closeEntry()
         }
 
-        if (BackupCategory.HISTORY in categories) {
+        if (BackupCategory.HISTORY in effectiveCategories) {
             val history = recordDb.listAllHistory()
             val jsonArray = JSONArray()
             for (record in history) {
@@ -151,7 +191,7 @@ class BackupUnit(
             zos.closeEntry()
         }
 
-        if (BackupCategory.DATABASE_DATA in categories) {
+        if (BackupCategory.DATABASE_DATA in effectiveCategories) {
             val db = bookmarkManager.database
             val json = JSONObject()
 
@@ -304,8 +344,12 @@ class BackupUnit(
                     zipEntry.name.startsWith("shared_prefs/")
                             && BackupCategory.ALL_PREFERENCES in categories -> {
                         val fileName = zipEntry.name.removePrefix("shared_prefs/")
-                        val file = File(sharedPrefsDir, remapPrefsFileName(fileName))
-                        writeStreamToFile(zis, file)
+                        // Never overwrite the local Tink keyset with a foreign one:
+                        // that would make this device's stored secrets undecryptable.
+                        if (fileName != SecretStore.KEYSET_PREF_XML) {
+                            val file = File(sharedPrefsDir, remapPrefsFileName(fileName))
+                            writeStreamToFile(zis, file)
+                        }
                     }
 
                     zipEntry.name == GPT_SETTINGS_FILE
@@ -400,8 +444,12 @@ class BackupUnit(
                     zipEntry.name.startsWith("shared_prefs/")
                             && BackupCategory.ALL_PREFERENCES in categories -> {
                         val fileName = zipEntry.name.removePrefix("shared_prefs/")
-                        val target = File(sharedPrefsDir, remapPrefsFileName(fileName))
-                        writeStreamToFile(zis, target)
+                        // Never overwrite the local Tink keyset with a foreign one:
+                        // that would make this device's stored secrets undecryptable.
+                        if (fileName != SecretStore.KEYSET_PREF_XML) {
+                            val target = File(sharedPrefsDir, remapPrefsFileName(fileName))
+                            writeStreamToFile(zis, target)
+                        }
                     }
 
                     zipEntry.name == GPT_SETTINGS_FILE
@@ -463,6 +511,10 @@ class BackupUnit(
 
             var zipEntry = zis.nextEntry
             while (zipEntry != null) {
+                if (zipEntry.name == SecretStore.KEYSET_PREF_XML) {
+                    zipEntry = zis.nextEntry
+                    continue
+                }
                 val file = if (zipEntry.name.endsWith(".db") ||
                     zipEntry.name.contains("einkbro_db")
                 ) File(databasesDir, zipEntry.name)
@@ -615,8 +667,17 @@ class BackupUnit(
     }
 
     private fun importGptSettings(json: JSONObject) {
+        // Backups from older app versions carry the API keys inside
+        // gpt_settings.json; route those into the encrypted store instead of
+        // re-planting them in the plaintext SharedPreferences.
+        val legacySecrets = mutableMapOf<String, String>()
         sp.edit {
             for (key in json.keys()) {
+                if (key in SecretKeys.ALL) {
+                    json.get(key).toString().takeIf { it.isNotEmpty() }
+                        ?.let { legacySecrets[key] = it }
+                    continue
+                }
                 when (val value = json.get(key)) {
                     is Boolean -> putBoolean(key, value)
                     is Int -> putInt(key, value)
@@ -627,7 +688,47 @@ class BackupUnit(
                 }
             }
         }
+        secretPrefs.putAll(legacySecrets)
     }
+
+    /** Reads the passphrase-encrypted secrets envelope from a backup zip, or null
+     *  when the zip has none. */
+    fun readSecretsEnvelope(context: Context, uri: Uri): JSONObject? = try {
+        context.contentResolver.openInputStream(uri)?.use { fis ->
+            readSecretsEnvelope(ZipInputStream(fis))
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
+
+    fun readSecretsEnvelope(file: File): JSONObject? = try {
+        ZipInputStream(file.inputStream()).use { readSecretsEnvelope(it) }
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
+
+    private fun readSecretsEnvelope(zis: ZipInputStream): JSONObject? {
+        var zipEntry = zis.nextEntry
+        while (zipEntry != null) {
+            if (zipEntry.name == SECRETS_FILE) {
+                return JSONObject(String(zis.readBytes()))
+            }
+            zipEntry = zis.nextEntry
+        }
+        return null
+    }
+
+    /** Decrypts [envelope] with [passphrase] and stores the secrets in the
+     *  encrypted store. @return false on a wrong passphrase or unreadable data. */
+    suspend fun restoreSecrets(envelope: JSONObject, passphrase: String): Boolean =
+        withContext(Dispatchers.Default) {
+            val values = PassphraseCipher().decrypt(envelope, passphrase.toCharArray())
+                ?: return@withContext false
+            secretPrefs.putAll(values.filterKeys { it in SecretKeys.BACKUP })
+            true
+        }
 
     private fun writeFileToZip(zos: ZipOutputStream, file: File, entryName: String) {
         val fis = FileInputStream(file)
@@ -836,10 +937,12 @@ class BackupUnit(
         private const val BOOKMARKS_FILE = "bookmarks.json"
         private const val HISTORY_FILE = "history.json"
         private const val DATABASE_DATA_FILE = "database_data.json"
+        private const val SECRETS_FILE = "secrets.enc"
 
+        // API keys deliberately absent: secrets are exported only inside the
+        // passphrase-encrypted SECRETS category (secrets.enc), never in this
+        // plaintext JSON. importGptSettings still accepts them from old backups.
         private val GPT_PREF_KEYS = listOf(
-            "sp_gpt_api_key",
-            "sp_gemini_api_key",
             "sp_gpt_system_prompt",
             "sp_gpt_user_prompt",
             "sp_gpt_user_prompt_web_page",
