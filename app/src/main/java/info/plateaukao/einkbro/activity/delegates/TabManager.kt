@@ -1,6 +1,7 @@
 package info.plateaukao.einkbro.activity.delegates
 
 import android.annotation.SuppressLint
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.view.View
@@ -8,7 +9,6 @@ import android.widget.FrameLayout
 import androidx.fragment.app.FragmentActivity
 import info.plateaukao.einkbro.R
 import info.plateaukao.einkbro.activity.BrowserState
-import android.os.Bundle
 import info.plateaukao.einkbro.browser.AlbumCallback
 import info.plateaukao.einkbro.browser.AlbumController
 import info.plateaukao.einkbro.browser.BrowserContainer

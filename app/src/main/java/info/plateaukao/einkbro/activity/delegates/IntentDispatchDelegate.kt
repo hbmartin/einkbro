@@ -7,6 +7,7 @@ import android.content.Intent.ACTION_VIEW
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import info.plateaukao.einkbro.activity.BrowserState
+import info.plateaukao.einkbro.browser.AlbumController
 import info.plateaukao.einkbro.epub.EpubManager
 import info.plateaukao.einkbro.preference.ChatGPTActionInfo
 import info.plateaukao.einkbro.preference.ConfigManager
@@ -16,7 +17,6 @@ import info.plateaukao.einkbro.unit.BrowserUnit
 import info.plateaukao.einkbro.unit.HelperUnit
 import info.plateaukao.einkbro.unit.HelperUnit.toNormalScheme
 import info.plateaukao.einkbro.util.Constants.Companion.ACTION_DICT
-import info.plateaukao.einkbro.browser.AlbumController
 import info.plateaukao.einkbro.view.viewControllers.OverviewDialogController
 import info.plateaukao.einkbro.viewmodel.ExternalSearchViewModel
 import info.plateaukao.einkbro.viewmodel.RemoteConnViewModel
