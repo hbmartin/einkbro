@@ -12,6 +12,7 @@ import info.plateaukao.einkbro.data.remote.ToolDefinition
 import info.plateaukao.einkbro.preference.AiConfig
 import info.plateaukao.einkbro.preference.ChatGPTActionInfo
 import info.plateaukao.einkbro.preference.ConfigManager
+import info.plateaukao.einkbro.preference.FakeSecretPrefs
 import info.plateaukao.einkbro.preference.GptActionType
 import io.mockk.every
 import io.mockk.mockk
@@ -88,8 +89,14 @@ class OpenAiRepositoryTest {
             every { getString(AiConfig.K_GEMINI_API_KEY, any()) } returns geminiApiKey
             every { getString("sp_gpt_server_url", any()) } returns baseUrl
         }
+        val secrets = FakeSecretPrefs(
+            mutableMapOf(
+                AiConfig.K_GPT_API_KEY to apiKey,
+                AiConfig.K_GEMINI_API_KEY to geminiApiKey,
+            )
+        )
         val configManager: ConfigManager = mockk {
-            every { ai } returns AiConfig(sp)
+            every { ai } returns AiConfig(sp, secrets)
         }
         startKoin {
             modules(module { single { configManager } })

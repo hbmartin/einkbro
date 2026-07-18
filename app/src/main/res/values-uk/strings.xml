@@ -540,5 +540,4 @@
     <string name="drive_restore_backup">Відновити резервну копію від %s</string>
     <string name="drive_sign_out">Вийти (%s)</string>
     <string name="drive_sign_in_failed">Не вдалося ввійти в Google</string>
-    <string name="drive_not_configured">У цій збірці не налаштовано клієнт Google OAuth</string>
 </resources>

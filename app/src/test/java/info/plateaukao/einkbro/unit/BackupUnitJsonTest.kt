@@ -3,7 +3,10 @@ package info.plateaukao.einkbro.unit
 import android.content.Context
 import android.content.SharedPreferences
 import info.plateaukao.einkbro.database.Bookmark
+import info.plateaukao.einkbro.preference.AiConfig
+import info.plateaukao.einkbro.preference.FakeSecretPrefs
 import info.plateaukao.einkbro.preference.FakeSharedPreferences
+import info.plateaukao.einkbro.preference.SecretPrefs
 import io.mockk.mockk
 import org.json.JSONArray
 import org.json.JSONObject
@@ -36,13 +39,20 @@ class BackupUnitJsonTest {
     val tempFolder = TemporaryFolder()
 
     private lateinit var fakeSp: FakeSharedPreferences
+    private lateinit var fakeSecrets: FakeSecretPrefs
     private lateinit var backupUnit: BackupUnit
 
     @Before
     fun setUp() {
         fakeSp = FakeSharedPreferences()
+        fakeSecrets = FakeSecretPrefs()
         startKoin {
-            modules(module { single<SharedPreferences> { fakeSp } })
+            modules(
+                module {
+                    single<SharedPreferences> { fakeSp }
+                    single<SecretPrefs> { fakeSecrets }
+                }
+            )
         }
         backupUnit = BackupUnit(mockk<Context>(relaxed = true))
     }
@@ -178,7 +188,7 @@ class BackupUnitJsonTest {
 
         val json = invokePrivate("exportGptSettings") as JSONObject
 
-        assertEquals("sk-secret", json.getString("sp_gpt_api_key"))
+        assertFalse(json.has("sp_gpt_api_key"))
         assertTrue(json.getBoolean("sp_use_openai_tts"))
         assertEquals(3, json.getInt("K_GPT_VOICE_OPTION"))
         assertFalse(json.has("sp_fontSize"))
@@ -186,8 +196,6 @@ class BackupUnitJsonTest {
 
     @Test
     fun `gpt settings survive an export-import round trip`() {
-        fakeSp.store["sp_gpt_api_key"] = "sk-secret"
-        fakeSp.store["sp_gemini_api_key"] = "gm-key"
         fakeSp.store["sp_gp_model"] = "gpt-4.1"
         fakeSp.store["sp_use_openai_tts"] = false
         fakeSp.store["sp_enable_open_ai_stream"] = true
@@ -205,9 +213,26 @@ class BackupUnitJsonTest {
     }
 
     @Test
-    fun `gpt settings export skips keys that are not set`() {
+    fun `gpt settings export skips plaintext secret keys`() {
         fakeSp.store["sp_gpt_api_key"] = "only-this"
         val json = invokePrivate("exportGptSettings") as JSONObject
-        assertEquals(1, json.length())
+        assertEquals(0, json.length())
+    }
+
+    @Test
+    fun `legacy gpt settings import routes API keys into encrypted storage`() {
+        val json = JSONObject().apply {
+            put(AiConfig.K_GPT_API_KEY, "sk-secret")
+            put(AiConfig.K_GEMINI_API_KEY, "gm-key")
+            put("sp_gp_model", "gpt-4.1")
+        }
+
+        invokePrivate("importGptSettings", json)
+
+        assertEquals("sk-secret", fakeSecrets.values[AiConfig.K_GPT_API_KEY])
+        assertEquals("gm-key", fakeSecrets.values[AiConfig.K_GEMINI_API_KEY])
+        assertFalse(fakeSp.contains(AiConfig.K_GPT_API_KEY))
+        assertFalse(fakeSp.contains(AiConfig.K_GEMINI_API_KEY))
+        assertEquals("gpt-4.1", fakeSp.getString("sp_gp_model", null))
     }
 }

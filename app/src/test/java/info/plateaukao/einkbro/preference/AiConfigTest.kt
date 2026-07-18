@@ -15,7 +15,7 @@ class AiConfigTest {
     @Before
     fun setUp() {
         sp = FakeSharedPreferences()
-        config = AiConfig(sp)
+        config = AiConfig(sp, FakeSecretPrefs())
     }
 
     @Test

@@ -550,5 +550,4 @@
     <string name="drive_restore_backup">Khôi phục bản sao lưu từ %s</string>
     <string name="drive_sign_out">Đăng xuất (%s)</string>
     <string name="drive_sign_in_failed">Đăng nhập Google thất bại</string>
-    <string name="drive_not_configured">Bản dựng này chưa được cấu hình ứng dụng khách Google OAuth</string>
 </resources>

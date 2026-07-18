@@ -31,12 +31,14 @@ object SecretKeys {
         ConfigManager.K_INSTAPAPER_PASSWORD,
     )
 
-    /** Everything stored encrypted at rest. The Google Drive OAuth entries are
-     *  never exported at all: a refresh token grants live access to the user's
-     *  Drive, and signing in again on a new device is cheap. */
-    val ALL: List<String> = BACKUP + listOf(
-        ConfigManager.K_DRIVE_AUTH_STATE,
-        ConfigManager.K_DRIVE_PENDING_AUTH,
+    /** Everything stored encrypted at rest. */
+    val ALL: List<String> = BACKUP
+
+    /** Device OAuth state used by older versions. It may contain a refresh token,
+     *  so it is deleted instead of migrated or backed up. */
+    val DEPRECATED_DEVICE_OAUTH: List<String> = listOf(
+        "sp_drive_auth_state",
+        "sp_drive_pending_auth",
     )
 }
 
@@ -214,18 +216,33 @@ object SecretMigration {
      * first load of the store so secrets restored from old backups (which land
      * as plaintext in the default prefs) are swept on the next launch.
      *
-     * @return true when something was migrated.
+     * Obsolete device OAuth state is purged from both stores rather than
+     * migrated because it may contain a long-lived refresh token.
+     *
+     * @return true when anything was migrated or deleted.
      */
     fun sweep(sp: SharedPreferences, secrets: SecretPrefs): Boolean {
         val found = SecretKeys.ALL.mapNotNull { key ->
             sp.getString(key, null)?.takeIf { it.isNotEmpty() }?.let { key to it }
         }
-        if (found.isEmpty()) return false
-        secrets.putAll(found.toMap())
+        if (found.isNotEmpty()) {
+            secrets.putAll(found.toMap())
+        }
+
+        val deprecatedEncrypted = secrets.snapshot(SecretKeys.DEPRECATED_DEVICE_OAUTH).keys
+        if (deprecatedEncrypted.isNotEmpty()) {
+            secrets.putAll(deprecatedEncrypted.associateWith { "" })
+        }
+
+        val plaintextKeysToDelete = (SecretKeys.ALL + SecretKeys.DEPRECATED_DEVICE_OAUTH)
+            .filter(sp::contains)
+        if (plaintextKeysToDelete.isEmpty() && deprecatedEncrypted.isEmpty()) {
+            return false
+        }
         // commit (not apply) so the on-disk XML loses the plaintext before any
         // "export all preferences" could copy the file verbatim.
         sp.edit(commit = true) {
-            found.forEach { (key, _) -> remove(key) }
+            plaintextKeysToDelete.forEach(::remove)
         }
         return true
     }

@@ -1,5 +1,6 @@
 package info.plateaukao.einkbro.activity
 
+import android.accounts.Account
 import android.content.Context
 import android.content.Intent
 import android.content.Intent.FLAG_ACTIVITY_NO_ANIMATION
@@ -7,6 +8,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import android.view.WindowInsets
 import android.view.WindowManager
@@ -51,6 +53,12 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.google.android.gms.auth.api.identity.AuthorizationRequest
+import com.google.android.gms.auth.api.identity.AuthorizationResult
+import com.google.android.gms.auth.api.identity.ClearTokenRequest
+import com.google.android.gms.auth.api.identity.Identity
+import com.google.android.gms.auth.api.identity.RevokeAccessRequest
+import com.google.android.gms.common.api.Scope
 import info.plateaukao.einkbro.R
 import info.plateaukao.einkbro.activity.SettingRoute.About
 import info.plateaukao.einkbro.activity.SettingRoute.Backup
@@ -113,9 +121,31 @@ class SettingActivity : FragmentActivity(), BackupOps {
     private val driveRepository: GoogleDriveRepository by inject()
     private val dialogManager: DialogManager by lazy { DialogManager(this) }
     private val backupUnit: BackupUnit by lazy { BackupUnit(this) }
+    private val driveAuthorizationClient by lazy { Identity.getAuthorizationClient(this) }
+    private val driveScopes = listOf(Scope(GoogleDriveRepository.SCOPE))
 
     private var pendingBackupCategories: Set<BackupCategory> = emptySet()
     private var pendingBackupPassphrase: String? = null
+    private var driveAccount: Account? = null
+    private var driveAccountLabel: String = "Google Drive"
+
+    private val driveAuthorizationLauncher =
+        registerForActivityResult(ActivityResultContracts.StartIntentSenderForResult()) { result ->
+            val data = result.data
+            if (result.resultCode != RESULT_OK || data == null) {
+                clearDriveSession()
+                EBToast.show(this, R.string.drive_sign_in_failed)
+                return@registerForActivityResult
+            }
+
+            runCatching {
+                driveAuthorizationClient.getAuthorizationResultFromIntent(data)
+            }.onSuccess(::completeDriveAuthorization)
+                .onFailure {
+                    clearDriveSession()
+                    EBToast.show(this, R.string.drive_sign_in_failed)
+                }
+        }
 
     private val exportBookmarksLauncher: ActivityResultLauncher<Intent> =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -178,7 +208,8 @@ class SettingActivity : FragmentActivity(), BackupOps {
         readSecretsEnvelope: () -> org.json.JSONObject?,
     ): Boolean {
         val others = selected - BackupCategory.SECRETS
-        val othersRestored = others.isNotEmpty() && restoreOthers(others)
+        val othersRestored = others.isNotEmpty() &&
+            withContext(Dispatchers.IO) { restoreOthers(others) }
         var secretsRestored = false
         if (BackupCategory.SECRETS in selected) {
             val envelope = withContext(Dispatchers.IO) { readSecretsEnvelope() }
@@ -189,7 +220,10 @@ class SettingActivity : FragmentActivity(), BackupOps {
                         requireConfirmation = false,
                         initialErrorResId = errorResId,
                     ) ?: break
-                    if (backupUnit.restoreSecrets(envelope, passphrase)) {
+                    if (withContext(Dispatchers.IO) {
+                            backupUnit.restoreSecrets(envelope, passphrase)
+                        }
+                    ) {
                         secretsRestored = true
                         break
                     }
@@ -428,20 +462,48 @@ class SettingActivity : FragmentActivity(), BackupOps {
     }
 
     override fun syncWithGoogleDrive() {
-        if (!driveRepository.isConfigured) {
-            EBToast.show(this, R.string.drive_not_configured)
-            return
-        }
-        if (driveRepository.email == null) {
-            startDriveSignIn()
-        } else {
-            showDriveSyncDialog()
-        }
+        requestDriveAuthorization()
     }
 
-    /** Open the Google consent page as a normal browser tab; EBWebViewClient
-     *  intercepts the custom-scheme redirect and returns here on success. */
-    private fun startDriveSignIn() = handleLink(driveRepository.beginAuth())
+    private fun requestDriveAuthorization() {
+        val request = AuthorizationRequest.builder()
+            .setRequestedScopes(driveScopes)
+            .build()
+        driveAuthorizationClient.authorize(request)
+            .addOnSuccessListener { result ->
+                if (isFinishing || isDestroyed) return@addOnSuccessListener
+                if (result.hasResolution()) {
+                    val pendingIntent = result.pendingIntent
+                    if (pendingIntent == null) {
+                        clearDriveSession()
+                        EBToast.show(this, R.string.drive_sign_in_failed)
+                    } else {
+                        driveAuthorizationLauncher.launch(
+                            IntentSenderRequest.Builder(pendingIntent.intentSender).build()
+                        )
+                    }
+                } else {
+                    completeDriveAuthorization(result)
+                }
+            }
+            .addOnFailureListener {
+                clearDriveSession()
+                EBToast.show(this, R.string.drive_sign_in_failed)
+            }
+    }
+
+    private fun completeDriveAuthorization(result: AuthorizationResult) {
+        if (!driveRepository.acceptAuthorization(result.accessToken, result.grantedScopes)) {
+            clearDriveSession()
+            EBToast.show(this, R.string.drive_sign_in_failed)
+            return
+        }
+
+        val account = result.toGoogleSignInAccount()
+        driveAccount = account?.account
+        driveAccountLabel = account?.email ?: "Google Drive"
+        showDriveSyncDialog()
+    }
 
     /** Run a Drive operation; on an expired/revoked session restart sign-in,
      *  on any other failure show a generic error toast. */
@@ -450,7 +512,7 @@ class SettingActivity : FragmentActivity(), BackupOps {
             try {
                 block()
             } catch (e: DriveReauthRequiredException) {
-                startDriveSignIn()
+                renewDriveAuthorization(e.invalidAccessToken)
             } catch (e: Exception) {
                 EBToast.show(this@SettingActivity, R.string.toast_error)
             }
@@ -461,15 +523,15 @@ class SettingActivity : FragmentActivity(), BackupOps {
         val remote = driveRepository.getRemoteBackup()
 
         val options = mutableListOf<Pair<String, () -> Unit>>(
-            getString(R.string.drive_upload_backup) to { uploadBackupToDrive(remote?.id) }
+            getString(R.string.drive_upload_backup) to { uploadBackupToDrive() }
         )
         if (remote != null) {
             options += getString(
                 R.string.drive_restore_backup, formatDriveTime(remote.modifiedTime)
             ) to { restoreBackupFromDrive(remote.id) }
         }
-        options += getString(R.string.drive_sign_out, driveRepository.email.orEmpty()) to {
-            driveRepository.signOut()
+        options += getString(R.string.drive_sign_out, driveAccountLabel) to {
+            disconnectDrive()
         }
 
         val selected = dialogManager.getSelectedOptionWithString(
@@ -478,7 +540,7 @@ class SettingActivity : FragmentActivity(), BackupOps {
         options[selected].second()
     }
 
-    private fun uploadBackupToDrive(existingId: String?) = launchDriveOp {
+    private fun uploadBackupToDrive() = launchDriveOp {
         val (categories, passphrase) = resolveExportSecrets(BackupCategory.entries.toSet())
         val tempFile = withContext(Dispatchers.IO) {
             backupUnit.backupToTempFile(categories, "drive_upload.zip", passphrase)
@@ -488,11 +550,46 @@ class SettingActivity : FragmentActivity(), BackupOps {
             return@launchDriveOp
         }
         try {
-            driveRepository.uploadBackup(tempFile, existingId)
+            driveRepository.uploadBackup(tempFile)
             EBToast.show(this@SettingActivity, R.string.toast_backup_successful)
         } finally {
             tempFile.delete()
         }
+    }
+
+    private fun renewDriveAuthorization(invalidAccessToken: String?) {
+        clearDriveSession()
+        if (invalidAccessToken.isNullOrBlank()) {
+            requestDriveAuthorization()
+            return
+        }
+
+        val request = ClearTokenRequest.builder()
+            .setToken(invalidAccessToken)
+            .build()
+        driveAuthorizationClient.clearToken(request)
+            .addOnCompleteListener { requestDriveAuthorization() }
+    }
+
+    private fun disconnectDrive() {
+        val account = driveAccount
+        clearDriveSession()
+        if (account == null) return
+
+        val request = RevokeAccessRequest.builder()
+            .setAccount(account)
+            .setScopes(driveScopes)
+            .build()
+        driveAuthorizationClient.revokeAccess(request)
+            .addOnFailureListener {
+                EBToast.show(this, R.string.toast_error)
+            }
+    }
+
+    private fun clearDriveSession() {
+        driveRepository.clearAuthorization()
+        driveAccount = null
+        driveAccountLabel = "Google Drive"
     }
 
     private fun restoreBackupFromDrive(fileId: String) = launchDriveOp {
