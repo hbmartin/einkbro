@@ -14,6 +14,9 @@ class TabConfig(private val sp: SharedPreferences) {
     var confirmTabClose by BooleanPreference(sp, K_CONFIRM_TAB_CLOSE, false)
     var shouldShowTabBar by BooleanPreference(sp, K_SHOW_TAB_BAR, false)
 
+    // Hibernate least-recently-used tabs beyond this many live WebViews; 0 = unlimited
+    var maxLiveTabs by IntPreference(sp, K_MAX_LIVE_TABS, 0)
+
     var newTabBehavior: NewTabBehavior
         get() = NewTabBehavior.entries[sp.getString(K_NEW_TAB_BEHAVIOR, "0")?.toInt() ?: 0]
         set(value) = sp.edit { putString(K_NEW_TAB_BEHAVIOR, value.ordinal.toString()) }
@@ -97,6 +100,7 @@ class TabConfig(private val sp: SharedPreferences) {
         const val K_CLOSE_TAB_WHEN_BACK = "sp_close_tab_when_no_more_back_history"
         const val K_CONFIRM_TAB_CLOSE = "sp_close_tab_confirm"
         const val K_SHOW_TAB_BAR = "sp_show_tab_bar"
+        const val K_MAX_LIVE_TABS = "sp_max_live_tabs"
         const val K_NEW_TAB_BEHAVIOR = "sp_plus_behavior"
         const val K_SAVED_ALBUM_INFO = "sp_saved_album_info"
         const val K_SAVED_ALBUM_INDEX = "sp_saved_album_index"
