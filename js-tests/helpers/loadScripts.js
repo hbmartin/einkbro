@@ -43,4 +43,16 @@ function rerunTranslateByParagraph() {
   evalInWindow(loadAsset('translate_by_paragraph.js'));
 }
 
-module.exports = { loadTranslatePipeline, rerunTranslateByParagraph, loadAsset };
+// Loads gm_shim.js the way UserScriptManager.buildInjectionJs does: substitute the
+// script id, the per-document capability token, and GM_info before evaluating.
+// replaceAll, not replace: Kotlin's String.replace substitutes every occurrence, and the
+// placeholders also appear in the shim's header comment.
+function loadGmShim({ scriptId, token, gmInfo = {} }) {
+  const code = loadAsset('gm_shim.js')
+    .replaceAll('__SCRIPT_ID__', String(scriptId))
+    .replaceAll('__SCRIPT_TOKEN__', token)
+    .replaceAll('__GM_INFO__', JSON.stringify(gmInfo));
+  evalInWindow(code);
+}
+
+module.exports = { loadTranslatePipeline, rerunTranslateByParagraph, loadGmShim, loadAsset };

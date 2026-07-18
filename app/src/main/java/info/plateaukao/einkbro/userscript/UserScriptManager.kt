@@ -134,11 +134,13 @@ class UserScriptManager(private val context: Context) : KoinComponent {
 
     /**
      * Builds the JS to inject for a script: the templated GM shim, then any
-     * resolved @require contents, then the script body.
+     * resolved @require contents, then the script body. [token] is the per-document
+     * capability (see UserScriptTokenRegistry) the shim must present on bridge calls.
      */
-    fun buildInjectionJs(parsed: ParsedUserScript): String {
+    fun buildInjectionJs(parsed: ParsedUserScript, token: String): String {
         val shim = HelperUnit.loadAssetFile("gm_shim.js")
             .replace("__SCRIPT_ID__", parsed.script.id.toString())
+            .replace("__SCRIPT_TOKEN__", token)
             .replace("__GM_INFO__", buildGmInfo(parsed))
         return buildString {
             append(shim).append('\n')

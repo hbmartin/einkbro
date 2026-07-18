@@ -39,6 +39,7 @@ import info.plateaukao.einkbro.preference.HighlightStyle
 import info.plateaukao.einkbro.unit.BrowserUnit
 import info.plateaukao.einkbro.unit.HelperUnit
 import info.plateaukao.einkbro.unit.ViewUnit.dp
+import info.plateaukao.einkbro.userscript.UserScriptTokenRegistry
 import info.plateaukao.einkbro.util.PdfDocumentAdapter
 import info.plateaukao.einkbro.viewmodel.TRANSLATE_API
 import kotlinx.coroutines.CoroutineScope
@@ -397,6 +398,12 @@ open class EBWebView(
      */
     @Volatile
     var currentPageUrl: String? = null
+
+    /**
+     * Capability tokens the einkbroGM bridge requires; issued per userscript injection
+     * (EBWebViewClient.injectUserScripts), cleared when the document URL changes.
+     */
+    val userScriptTokens = UserScriptTokenRegistry()
 
     /** Menu commands registered via GM_registerMenuCommand on the current page (caption to fnId). */
     val userScriptMenuCommands = LinkedHashMap<String, String>()

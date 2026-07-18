@@ -1,5 +1,6 @@
 // EinkBro userscript GM API shim.
-// Templated per-script: __SCRIPT_ID__ and __GM_INFO__ are substituted at inject time.
+// Templated per-script: __SCRIPT_ID__, __SCRIPT_TOKEN__ and __GM_INFO__ are substituted
+// at inject time.
 // Defines GM_* and the promisified GM.* on the page's window so userscripts can use them.
 
 // Some Android System WebView builds don't expose `globalThis` in the injected script
@@ -32,6 +33,10 @@ if (typeof globalThis === 'undefined') {
 
 (function () {
     var SCRIPT_ID = __SCRIPT_ID__;
+    // Per-document capability the native bridge requires on every call; it resolves the
+    // token back to the script id and denies calls without it. SCRIPT_ID stays only for
+    // reqId/fnId correlation and GM_info — it is public and grants nothing.
+    var SCRIPT_TOKEN = '__SCRIPT_TOKEN__';
     var GM_INFO = __GM_INFO__;
 
     // Shared per-page registry, keyed by script id, on a single hidden global.
@@ -89,7 +94,7 @@ if (typeof globalThis === 'undefined') {
 
     function GM_getValue(key, defaultValue) {
         try {
-            var raw = bridge.gmGetValue(SCRIPT_ID, key);
+            var raw = bridge.gmGetValue(SCRIPT_TOKEN, key);
             if (raw === null || raw === undefined) return defaultValue;
             return JSON.parse(raw);
         } catch (e) {
@@ -98,16 +103,16 @@ if (typeof globalThis === 'undefined') {
     }
 
     function GM_setValue(key, value) {
-        bridge.gmSetValue(SCRIPT_ID, key, JSON.stringify(value));
+        bridge.gmSetValue(SCRIPT_TOKEN, key, JSON.stringify(value));
     }
 
     function GM_deleteValue(key) {
-        bridge.gmDeleteValue(SCRIPT_ID, key);
+        bridge.gmDeleteValue(SCRIPT_TOKEN, key);
     }
 
     function GM_listValues() {
         try {
-            return JSON.parse(bridge.gmListValues(SCRIPT_ID) || '[]');
+            return JSON.parse(bridge.gmListValues(SCRIPT_TOKEN) || '[]');
         } catch (e) {
             return [];
         }
@@ -158,7 +163,7 @@ if (typeof globalThis === 'undefined') {
             password: details.password || null
         };
         try {
-            bridge.gmXhr(SCRIPT_ID, reqId, JSON.stringify(wire));
+            bridge.gmXhr(SCRIPT_TOKEN, reqId, JSON.stringify(wire));
         } catch (e) {
             delete hub.xhrCallbacks[reqId];
             if (details.onerror) details.onerror({ error: String(e) });
@@ -171,34 +176,34 @@ if (typeof globalThis === 'undefined') {
     function GM_registerMenuCommand(caption, fn) {
         var fnId = SCRIPT_ID + ':menu:' + (++hub.seq);
         hub.menuCallbacks[fnId] = fn;
-        try { bridge.gmRegisterMenuCommand(SCRIPT_ID, String(caption), fnId); } catch (e) {}
+        try { bridge.gmRegisterMenuCommand(SCRIPT_TOKEN, String(caption), fnId); } catch (e) {}
         return fnId;
     }
 
     function GM_unregisterMenuCommand(fnId) {
         delete hub.menuCallbacks[fnId];
-        try { bridge.gmUnregisterMenuCommand(fnId); } catch (e) {}
+        try { bridge.gmUnregisterMenuCommand(SCRIPT_TOKEN, fnId); } catch (e) {}
     }
 
     function GM_openInTab(url, options) {
         var active = true;
         if (typeof options === 'boolean') active = !options; // legacy: openInBackground
         else if (options && typeof options === 'object') active = options.active !== false;
-        try { bridge.gmOpenInTab(url, active); } catch (e) {}
+        try { bridge.gmOpenInTab(SCRIPT_TOKEN, url, active); } catch (e) {}
         return { closed: false, close: function () {} };
     }
 
     function GM_setClipboard(text) {
-        try { bridge.gmSetClipboard(String(text)); } catch (e) {}
+        try { bridge.gmSetClipboard(SCRIPT_TOKEN, String(text)); } catch (e) {}
     }
 
     function GM_log() {
-        try { bridge.gmLog(Array.prototype.join.call(arguments, ' ')); } catch (e) {}
+        try { bridge.gmLog(SCRIPT_TOKEN, Array.prototype.join.call(arguments, ' ')); } catch (e) {}
     }
 
     function GM_notification(textOrDetails) {
         var text = typeof textOrDetails === 'object' ? textOrDetails.text : textOrDetails;
-        try { bridge.gmNotification(String(text)); } catch (e) {}
+        try { bridge.gmNotification(SCRIPT_TOKEN, String(text)); } catch (e) {}
     }
 
     function promisify(fn) {

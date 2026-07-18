@@ -28,6 +28,10 @@ private const val CACHE_EXPIRATION_DAYS = 5
 private const val CACHE_TEXT_LENGTH_LIMIT = 15
 private const val MAX_DOWNLOAD_ID_LENGTH = 64
 
+// The only callback name our injected JS (text_node_monitor.js) ever passes. The callback
+// is evaluated back into the page, so a caller-chosen name must not be accepted.
+private const val TRANSLATION_JS_CALLBACK = "myCallback"
+
 class JsWebInterface(
     private val webView: EBWebView,
     private val jsBrowserCallback: JsBrowserCallback? = null,
@@ -52,6 +56,14 @@ class JsWebInterface(
 
     @JavascriptInterface
     fun getTranslation(originalText: String, elementId: String, callback: String) {
+        // The bridge is reachable from any page/frame JS, and translation spends the
+        // user's paid API quota. Only honor calls while by-paragraph/in-place translation
+        // is armed on this WebView (set in WebViewTranslationHelper when the user starts
+        // it, cleared on navigation in EBWebViewClient.onPageStarted).
+        if (!webView.isTranslateByParagraph || callback != TRANSLATION_JS_CALLBACK) {
+            Log.w("JsWebInterface", "getTranslation denied (armed=${webView.isTranslateByParagraph})")
+            return
+        }
         coroutineScope.launch(Dispatchers.IO) {
             val currentLanguage = configManager.translation.translationLanguage.value
             val currentTime = System.currentTimeMillis()
@@ -66,7 +78,7 @@ class JsWebInterface(
                         withContext(Dispatchers.Main) {
                             if (webView.isAttachedToWindow) {
                                 webView.evaluateJavascript(
-                                    "$callback('$elementId', '${escapeForJs(originalText)}', '${escapeForJs(cachedEntry.translatedText)}')",
+                                    "$callback('${escapeForJs(elementId)}', '${escapeForJs(originalText)}', '${escapeForJs(cachedEntry.translatedText)}')",
                                     null
                                 )
                             }
@@ -101,7 +113,7 @@ class JsWebInterface(
                     // later visibility event can retry instead of blocking it forever.
                     if (webView.isAttachedToWindow) {
                         webView.evaluateJavascript(
-                            "$callback('$elementId', '${escapeForJs(originalText)}', '${escapeForJs(translatedString)}')",
+                            "$callback('${escapeForJs(elementId)}', '${escapeForJs(originalText)}', '${escapeForJs(translatedString)}')",
                             null
                         )
                     }

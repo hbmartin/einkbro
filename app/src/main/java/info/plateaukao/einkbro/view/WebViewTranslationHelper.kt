@@ -8,6 +8,11 @@ class WebViewTranslationHelper(
     private val config: ConfigManager,
 ) {
     var translateApi: TRANSLATE_API = TRANSLATE_API.GOOGLE
+
+    // Gates JsWebInterface.getTranslation: armed here on the main thread when the user
+    // starts by-paragraph/in-place translation, read on the JS-bridge thread, disarmed
+    // on navigation (EBWebViewClient.onPageStarted) and in EBWebView.resetState().
+    @Volatile
     var isTranslateByParagraph = false
 
     fun clearTranslationElements() = webView.jsBridge.clearTranslationElements()
